@@ -241,6 +241,8 @@ func findFrontendDir() (string, bool) {
 		"../frontend/dist",
 		"frontend/dist",
 		"./dist",
+		"./public",
+		"public",
 	}
 	for _, dir := range candidates {
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
