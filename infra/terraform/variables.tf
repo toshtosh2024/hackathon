@@ -74,7 +74,7 @@ variable "github_branch_regex" {
 variable "enable_github_trigger" {
   description = "Create the GitHub Cloud Build trigger. Requires the GitHub repository to be connected to Cloud Build first."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "github_connection_name" {

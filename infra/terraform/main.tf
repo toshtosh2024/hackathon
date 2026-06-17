@@ -358,11 +358,12 @@ resource "google_cloudbuildv2_repository" "github" {
 }
 
 resource "google_cloudbuild_trigger" "github_main" {
-  count       = var.enable_github_trigger ? 1 : 0
-  name        = "${var.app_name}-github-main"
-  description = "Build and deploy ${var.github_owner}/${var.github_repository} main branch to Cloud Run"
-  filename    = "cloudbuild.yaml"
-  location    = var.github_connection_region
+  count           = var.enable_github_trigger ? 1 : 0
+  name            = "${var.app_name}-github-main"
+  description     = "Build and deploy ${var.github_owner}/${var.github_repository} main branch to Cloud Run"
+  filename        = "cloudbuild.yaml"
+  location        = var.github_connection_region
+  service_account = "projects/${var.project_id}/serviceAccounts/${local.cloud_build_sa}"
 
   repository_event_config {
     repository = google_cloudbuildv2_repository.github[0].id
