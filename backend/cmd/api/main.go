@@ -20,6 +20,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1439,7 +1440,15 @@ func (a *app) callOpenAIImageEdit(ctx context.Context, prompt string, images []i
 	_ = writer.WriteField("size", "1536x1024")
 	_ = writer.WriteField("output_format", "jpeg")
 	for _, image := range images {
-		part, err := writer.CreateFormFile("image[]", image.Filename)
+		h := make(textproto.MIMEHeader)
+		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image[]"; filename="%s"`, strings.ReplaceAll(image.Filename, "\"", "\\\"")))
+		contentType := image.ContentType
+		if contentType == "" {
+			contentType = "image/jpeg"
+		}
+		h.Set("Content-Type", contentType)
+
+		part, err := writer.CreatePart(h)
 		if err != nil {
 			return nil, err
 		}
