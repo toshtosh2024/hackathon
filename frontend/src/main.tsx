@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, FormEvent } from "react";
 import { createRoot } from "react-dom/client";
+import "./styles.css";
 import {
   Bot,
   CircleOff,
