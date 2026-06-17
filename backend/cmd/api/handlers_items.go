@@ -259,7 +259,7 @@ func (a *app) purchaseItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := tx.ExecContext(r.Context(), "INSERT INTO purchases (item_id, buyer_id, seller_id, price) VALUES (?, ?, ?, ?)", itemID, u.ID, it.SellerID, it.Price); err != nil {
+	if _, err := tx.ExecContext(r.Context(), "INSERT INTO purchases (item_id, buyer_id, seller_id, price, status) VALUES (?, ?, ?, ?, 'paid')", itemID, u.ID, it.SellerID, it.Price); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create purchase record")
 		return
 	}
@@ -552,4 +552,82 @@ type personalStatsResponse struct {
 	Summary              personalStatsSummary `json:"summary"`
 	CategoryDistribution []categoryStat       `json:"categoryDistribution"`
 	DailyRevenue         []dailyTransaction   `json:"dailyRevenue"`
+}
+
+func (a *app) shipPurchase(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	purchaseID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	db := a.dbHandle()
+	var sellerID int64
+	var status string
+	err := db.QueryRowContext(r.Context(), "SELECT seller_id, status FROM purchases WHERE id = ?", purchaseID).Scan(&sellerID, &status)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "取引情報が見つかりませんでした")
+		} else {
+			writeError(w, http.StatusInternalServerError, "DBエラーが発生しました: "+err.Error())
+		}
+		return
+	}
+
+	if sellerID != u.ID {
+		writeError(w, http.StatusForbidden, "出品者のみ発送通知を行えます")
+		return
+	}
+
+	if status != "paid" {
+		writeError(w, http.StatusConflict, "支払完了状態（paid）の取引のみ発送できます")
+		return
+	}
+
+	_, err = db.ExecContext(r.Context(), "UPDATE purchases SET status = 'shipped' WHERE id = ?", purchaseID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "発送情報の更新に失敗しました")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "shipped"})
+}
+
+func (a *app) receivePurchase(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	purchaseID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	db := a.dbHandle()
+	var buyerID int64
+	var status string
+	err := db.QueryRowContext(r.Context(), "SELECT buyer_id, status FROM purchases WHERE id = ?", purchaseID).Scan(&buyerID, &status)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "取引情報が見つかりませんでした")
+		} else {
+			writeError(w, http.StatusInternalServerError, "DBエラーが発生しました: "+err.Error())
+		}
+		return
+	}
+
+	if buyerID != u.ID {
+		writeError(w, http.StatusForbidden, "購入者のみ受取評価を行えます")
+		return
+	}
+
+	if status != "shipped" {
+		writeError(w, http.StatusConflict, "発送済み状態（shipped）の取引のみ受取完了にできます")
+		return
+	}
+
+	_, err = db.ExecContext(r.Context(), "UPDATE purchases SET status = 'completed' WHERE id = ?", purchaseID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "受取評価の更新に失敗しました")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "completed"})
 }

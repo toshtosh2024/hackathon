@@ -506,7 +506,7 @@ func (a *app) negotiateItem(w http.ResponseWriter, r *http.Request) {
 		}
 
 		pRes, err := tx.ExecContext(r.Context(),
-			"INSERT INTO purchases (item_id, buyer_id, seller_id, price) VALUES (?, ?, ?, ?)",
+			"INSERT INTO purchases (item_id, buyer_id, seller_id, price, status) VALUES (?, ?, ?, ?, 'paid')",
 			itemID, u.ID, it.SellerID, agreedPrice,
 		)
 		if err != nil {

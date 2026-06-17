@@ -77,6 +77,8 @@ type Conversation = {
   counterpartId: number;
   counterpartName: string;
   counterpartAvatarUrl: string;
+  purchaseId?: number;
+  purchaseStatus?: string;
   updatedAt: string;
 };
 
@@ -382,6 +384,7 @@ function App() {
               api={api}
               onSelect={(conversationId) => void loadMessages(conversationId)}
               onOpenItem={(itemId) => navigate({ page: "item", itemId })}
+              onRefreshConversations={loadConversations}
             />
           )}
 
@@ -389,6 +392,7 @@ function App() {
             <MyPageScreen
               user={user}
               myItems={myItems}
+              conversations={conversations}
               api={api}
               onSessionUpdated={updateSession}
               onOpenSell={() => navigate({ page: "sell" })}
@@ -1383,7 +1387,8 @@ function MessagesScreen({
   messages,
   api,
   onSelect,
-  onOpenItem
+  onOpenItem,
+  onRefreshConversations
 }: {
   user: User | null;
   conversations: Conversation[];
@@ -1392,8 +1397,10 @@ function MessagesScreen({
   api: <T>(path: string, options?: RequestInit) => Promise<T>;
   onSelect: (conversationId: number) => void;
   onOpenItem: (itemId: number) => void;
+  onRefreshConversations?: () => Promise<void>;
 }) {
   const [body, setBody] = useState("購入前に状態をもう少し教えてください。");
+  const [shippingLoading, setShippingLoading] = useState(false);
 
   async function send(event: FormEvent) {
     event.preventDefault();
@@ -1404,6 +1411,34 @@ function MessagesScreen({
     });
     setBody("");
     onSelect(selectedConversation.id);
+  }
+
+  async function shipItem() {
+    if (!selectedConversation) return;
+    setShippingLoading(true);
+    try {
+      await api(`/purchases/${selectedConversation.purchaseId}/ship`, { method: "POST" });
+      if (onRefreshConversations) await onRefreshConversations();
+      onSelect(selectedConversation.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "発送通知に失敗しました");
+    } finally {
+      setShippingLoading(false);
+    }
+  }
+
+  async function receiveItem() {
+    if (!selectedConversation) return;
+    setShippingLoading(true);
+    try {
+      await api(`/purchases/${selectedConversation.purchaseId}/receive`, { method: "POST" });
+      if (onRefreshConversations) await onRefreshConversations();
+      onSelect(selectedConversation.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "受取報告に失敗しました");
+    } finally {
+      setShippingLoading(false);
+    }
   }
 
   return (
@@ -1456,6 +1491,61 @@ function MessagesScreen({
                 </small>
               </div>
             </button>
+          )}
+
+          {/* Escrow Transaction Navigator (取引ナビ) */}
+          {selectedConversation && selectedConversation.itemStatus === "sold" && selectedConversation.purchaseStatus && (
+            <div style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "16px", margin: "12px", display: "flex", flexDirection: "column", gap: "10px" }}>
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "#475569" }}>🤝 Stripe エスクロー取引ナビ</span>
+              
+              {selectedConversation.purchaseStatus === "paid" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {user?.id === selectedConversation.sellerId ? (
+                    <>
+                      <p style={{ margin: 0, fontSize: "13px", color: "#1e293b", lineHeight: "1.4" }}>
+                        🎉 <strong>購入者の支払いが完了しました！</strong><br />
+                        売上金はStripeエスクロー（一時預かり）に安全に保護されています。商品を発送し、以下の「発送通知」ボタンを押してください。
+                      </p>
+                      <button className="primary-button" disabled={shippingLoading} onClick={shipItem} style={{ background: "#3b82f6", color: "#fff", border: "none", alignSelf: "start", padding: "8px 16px", fontSize: "13px", cursor: "pointer" }}>
+                        📦 商品を発送したので発送通知をする
+                      </button>
+                    </>
+                  ) : (
+                    <p style={{ margin: 0, fontSize: "13px", color: "#047857", lineHeight: "1.4" }}>
+                      🔒 <strong>決済が完了しました（エスクロー保護中）</strong><br />
+                      代金は取引が完了するまで運営に安全に保護されています。出品者による商品の発送をお待ちください。
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {selectedConversation.purchaseStatus === "shipped" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {user?.id === selectedConversation.sellerId ? (
+                    <p style={{ margin: 0, fontSize: "13px", color: "#0369a1", lineHeight: "1.4" }}>
+                      🚚 <strong>商品の発送を通知しました</strong><br />
+                      商品は配送中です。購入者が受け取りを確認し、「受取評価」を行うと自動で売上残高が確定されます。
+                    </p>
+                  ) : (
+                    <>
+                      <p style={{ margin: 0, fontSize: "13px", color: "#1e293b", lineHeight: "1.4" }}>
+                        🚚 <strong>出品者が商品を発送しました！</strong><br />
+                        荷物が届いたら中身を確認し、問題がなければ「受取確認＆取引完了」ボタンを押してください。完了すると出品者へ売上金がリリースされます。
+                      </p>
+                      <button className="primary-button" disabled={shippingLoading} onClick={receiveItem} style={{ background: "#10b981", color: "#fff", border: "none", alignSelf: "start", padding: "8px 16px", fontSize: "13px", cursor: "pointer" }}>
+                        ✅ 商品を受け取ったので取引を完了する
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {selectedConversation.purchaseStatus === "completed" && (
+                <p style={{ margin: 0, fontSize: "13px", color: "#047857", fontWeight: 600 }}>
+                  🎉 この取引は完了しました！ありがとうございました。
+                </p>
+              )}
+            </div>
           )}
           <div className="message-list">
             {messages.map((message) => (
@@ -1576,6 +1666,7 @@ interface BarterLoopDetail {
 function MyPageScreen({
   user,
   myItems,
+  conversations = [],
   api,
   onSessionUpdated,
   onOpenSell,
@@ -1584,6 +1675,7 @@ function MyPageScreen({
 }: {
   user: User | null;
   myItems: Item[];
+  conversations?: Conversation[];
   api: <T>(path: string, options?: RequestInit) => Promise<T>;
   onSessionUpdated: (token: string, user: User) => void;
   onOpenSell: () => void;
@@ -1597,6 +1689,14 @@ function MyPageScreen({
   const [stats, setStats] = useState<PersonalStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState("");
+
+  // Compute active escrow dynamically
+  const escrowBalance = (conversations || []).reduce((acc, c) => {
+    if (c.purchaseStatus === "paid" || c.purchaseStatus === "shipped") {
+      return acc + c.itemPrice;
+    }
+    return acc;
+  }, 0);
 
   // Barter Loop States
   const [barterLoops, setBarterLoops] = useState<BarterLoopDetail[]>([]);

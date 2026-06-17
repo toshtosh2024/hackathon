@@ -67,6 +67,8 @@ type conversation struct {
 	CounterpartID        int64     `json:"counterpartId"`
 	CounterpartName      string    `json:"counterpartName"`
 	CounterpartAvatarURL string    `json:"counterpartAvatarUrl"`
+	PurchaseID           int64     `json:"purchaseId"`
+	PurchaseStatus       string    `json:"purchaseStatus"`
 	UpdatedAt            time.Time `json:"updatedAt"`
 }
 
@@ -176,6 +178,10 @@ func main() {
 
 	// Negotiation Routes
 	mux.HandleFunc("POST /api/items/{id}/negotiate", a.requireAuth(a.negotiateItem))
+
+	// Escrow Purchase Routes
+	mux.HandleFunc("POST /api/purchases/{id}/ship", a.requireAuth(a.shipPurchase))
+	mux.HandleFunc("POST /api/purchases/{id}/receive", a.requireAuth(a.receivePurchase))
 
 	// Barter Loop Routes
 	mux.HandleFunc("GET /api/barter/loops", a.requireAuth(a.listBarterLoops))

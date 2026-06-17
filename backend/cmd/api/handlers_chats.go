@@ -12,10 +12,12 @@ func (a *app) listConversations(w http.ResponseWriter, r *http.Request) {
 		SELECT c.id, c.item_id, i.title, i.price, i.status,
 		       COALESCE((SELECT image_url FROM item_images WHERE item_id = i.id ORDER BY sort_order LIMIT 1), ''),
 		       i.category, c.buyer_id, c.seller_id,
-		       u_counter.id, u_counter.name, COALESCE(u_counter.avatar_url, ''), c.updated_at
+		       u_counter.id, u_counter.name, COALESCE(u_counter.avatar_url, ''),
+		       COALESCE(p.id, 0) as purchase_id, COALESCE(p.status, '') as purchase_status, c.updated_at
 		FROM conversations c
 		JOIN items i ON i.id = c.item_id
 		JOIN users u_counter ON u_counter.id = IF(c.buyer_id = ?, c.seller_id, c.buyer_id)
+		LEFT JOIN purchases p ON p.item_id = c.item_id AND (p.buyer_id = c.buyer_id OR p.seller_id = c.seller_id)
 		WHERE c.buyer_id = ? OR c.seller_id = ?
 		ORDER BY c.updated_at DESC`, u.ID, u.ID, u.ID,
 	)
@@ -31,7 +33,8 @@ func (a *app) listConversations(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&c.ID, &c.ItemID, &c.ItemTitle, &c.ItemPrice, &c.ItemStatus,
 			&c.ItemImageURL, &c.ItemCategory, &c.BuyerID, &c.SellerID,
-			&c.CounterpartID, &c.CounterpartName, &c.CounterpartAvatarURL, &c.UpdatedAt,
+			&c.CounterpartID, &c.CounterpartName, &c.CounterpartAvatarURL,
+			&c.PurchaseID, &c.PurchaseStatus, &c.UpdatedAt,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read conversation")
 			return
