@@ -85,6 +85,30 @@ func TestClampPrice(t *testing.T) {
 	}
 }
 
+func TestUploadPrefixSeparatesProfileImages(t *testing.T) {
+	if got := uploadPrefix("avatar"); got != "avatars" {
+		t.Fatalf("avatar prefix = %q, want avatars", got)
+	}
+	if got := uploadPrefix("item"); got != "items" {
+		t.Fatalf("item prefix = %q, want items", got)
+	}
+	if got := uploadPrefix(""); got != "items" {
+		t.Fatalf("default prefix = %q, want items", got)
+	}
+}
+
+func TestTokenPreservesAvatarURL(t *testing.T) {
+	a := &app{jwtSecret: "test-secret"}
+	want := user{ID: 7, Name: "Toshi", Email: "toshi@example.com", Role: "user", AvatarURL: "https://example.com/avatar.png"}
+	got, err := a.verifyToken(a.signToken(want))
+	if err != nil {
+		t.Fatalf("verifyToken returned error: %v", err)
+	}
+	if got.AvatarURL != want.AvatarURL {
+		t.Fatalf("avatar URL = %q, want %q", got.AvatarURL, want.AvatarURL)
+	}
+}
+
 func TestGuardDBReturnsDatabaseStatusWhenStarting(t *testing.T) {
 	a := &app{}
 	a.setDBStatus(context.DeadlineExceeded)

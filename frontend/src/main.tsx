@@ -15,6 +15,7 @@ import {
   ShieldAlert,
   ShoppingBag,
   Sparkles,
+  Star,
   Store,
   UploadCloud,
   UserCircle2,
@@ -36,6 +37,8 @@ type Item = {
   id: number;
   sellerId: number;
   sellerName: string;
+  sellerRatingAvg: number;
+  sellerReviewCount: number;
   title: string;
   description: string;
   category: string;
@@ -67,6 +70,20 @@ type Message = {
   conversationId: number;
   senderId: number;
   body: string;
+  createdAt: string;
+};
+
+type UserReview = {
+  id: number;
+  purchaseId: number;
+  itemId: number;
+  itemTitle: string;
+  reviewerId: number;
+  reviewerName: string;
+  revieweeId: number;
+  revieweeName: string;
+  rating: number;
+  comment: string;
   createdAt: string;
 };
 
@@ -506,6 +523,7 @@ function HomeScreen({
               <strong>{leadItem.title}</strong>
               <span>¥{leadItem.price.toLocaleString()}</span>
               <small>{leadItem.sellerName} さんが出品</small>
+              <small>{ratingLabel(leadItem.sellerRatingAvg, leadItem.sellerReviewCount)}</small>
             </div>
           </button>
         )}
@@ -570,6 +588,7 @@ function HomeScreen({
                   <small>
                     {item.category} / {item.status}
                   </small>
+                  <small>{ratingLabel(item.sellerRatingAvg, item.sellerReviewCount)}</small>
                 </div>
               </button>
             ))}
@@ -710,7 +729,7 @@ function CreateItemScreen({
     try {
       const signed = await api<{ uploadUrl: string; publicUrl: string; contentType: string }>("/upload", {
         method: "POST",
-        body: JSON.stringify({ filename: file.name, contentType: file.type })
+        body: JSON.stringify({ filename: file.name, contentType: file.type, purpose: "item" })
       });
       const response = await fetch(signed.uploadUrl, {
         method: "PUT",
@@ -912,7 +931,9 @@ function ItemDetailScreen({
         <div>
           <p className="eyebrow">Item Detail</p>
           <h2>{item.title}</h2>
-          <p className="muted">{item.sellerName} さんの出品</p>
+          <p className="muted">
+            {item.sellerName} さんの出品 / {ratingLabel(item.sellerRatingAvg, item.sellerReviewCount)}
+          </p>
         </div>
         <button className="ghost-button" onClick={onBack}>
           <Home size={18} />
@@ -930,6 +951,10 @@ function ItemDetailScreen({
             <div>
               <p className="eyebrow">{item.category}</p>
               <h3>{item.title}</h3>
+              <span className="rating-chip">
+                <Star size={16} />
+                {ratingLabel(item.sellerRatingAvg, item.sellerReviewCount)}
+              </span>
             </div>
             <strong>¥{item.price.toLocaleString()}</strong>
           </div>
@@ -1070,9 +1095,70 @@ function MessagesScreen({
               <Send size={18} />
             </button>
           </form>
+          {selectedConversation?.itemStatus === "sold" && (
+            <ReviewComposer
+              api={api}
+              itemId={selectedConversation.itemId}
+              counterpartName={selectedConversation.counterpartName}
+            />
+          )}
         </article>
       </section>
     </section>
+  );
+}
+
+function ReviewComposer({
+  api,
+  itemId,
+  counterpartName
+}: {
+  api: <T>(path: string, options?: RequestInit) => Promise<T>;
+  itemId: number;
+  counterpartName: string;
+}) {
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState("スムーズで安心できる取引でした。");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+    try {
+      await api<{ review: UserReview }>(`/items/${itemId}/reviews`, {
+        method: "POST",
+        body: JSON.stringify({ rating, comment })
+      });
+      setMessage("評価を投稿しました");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "評価の投稿に失敗しました");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="review-form" onSubmit={submit}>
+      <div className="panel-heading">
+        <Star size={18} />
+        <h3>{counterpartName} さんを評価</h3>
+      </div>
+      <div className="rating-picker">
+        {[1, 2, 3, 4, 5].map((value) => (
+          <button key={value} className={value <= rating ? "star-button active" : "star-button"} type="button" onClick={() => setRating(value)}>
+            <Star size={18} />
+          </button>
+        ))}
+      </div>
+      <textarea value={comment} onChange={(e) => setComment(e.target.value)} />
+      <button className="primary-button" disabled={saving || !comment.trim()} type="submit">
+        <Star size={18} />
+        {saving ? "投稿中" : "評価する"}
+      </button>
+      {message && <p className={message.includes("失敗") || message.includes("already") ? "error" : "notice inline-notice"}>{message}</p>}
+    </form>
   );
 }
 
@@ -1103,7 +1189,7 @@ function MyPageScreen({
     try {
       const signed = await api<{ uploadUrl: string; publicUrl: string; contentType: string }>("/upload", {
         method: "POST",
-        body: JSON.stringify({ filename: file.name, contentType: file.type })
+        body: JSON.stringify({ filename: file.name, contentType: file.type, purpose: "avatar" })
       });
       const response = await fetch(signed.uploadUrl, {
         method: "PUT",
@@ -1233,6 +1319,11 @@ function statusLabel(status: Item["status"] | Conversation["itemStatus"]) {
   if (status === "sold") return "売却済み";
   if (status === "hidden") return "公開停止";
   return "販売中";
+}
+
+function ratingLabel(avg: number, count: number) {
+  if (!count) return "評価なし";
+  return `★ ${avg.toFixed(1)} (${count}件)`;
 }
 
 function renderMarkdown(source: string) {

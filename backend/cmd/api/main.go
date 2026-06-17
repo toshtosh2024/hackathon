@@ -55,17 +55,33 @@ type user struct {
 }
 
 type item struct {
-	ID          int64     `json:"id"`
-	SellerID    int64     `json:"sellerId"`
-	SellerName  string    `json:"sellerName"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Category    string    `json:"category"`
-	Price       int       `json:"price"`
-	Status      string    `json:"status"`
-	ImageURL    string    `json:"imageUrl"`
-	LikeCount   int       `json:"likeCount"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID                int64     `json:"id"`
+	SellerID          int64     `json:"sellerId"`
+	SellerName        string    `json:"sellerName"`
+	SellerRatingAvg   float64   `json:"sellerRatingAvg"`
+	SellerReviewCount int       `json:"sellerReviewCount"`
+	Title             string    `json:"title"`
+	Description       string    `json:"description"`
+	Category          string    `json:"category"`
+	Price             int       `json:"price"`
+	Status            string    `json:"status"`
+	ImageURL          string    `json:"imageUrl"`
+	LikeCount         int       `json:"likeCount"`
+	CreatedAt         time.Time `json:"createdAt"`
+}
+
+type userReview struct {
+	ID           int64     `json:"id"`
+	PurchaseID   int64     `json:"purchaseId"`
+	ItemID       int64     `json:"itemId"`
+	ItemTitle    string    `json:"itemTitle"`
+	ReviewerID   int64     `json:"reviewerId"`
+	ReviewerName string    `json:"reviewerName"`
+	RevieweeID   int64     `json:"revieweeId"`
+	RevieweeName string    `json:"revieweeName"`
+	Rating       int       `json:"rating"`
+	Comment      string    `json:"comment"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 type conversation struct {
@@ -134,6 +150,9 @@ func main() {
 	mux.HandleFunc("POST /api/items/{id}/cancel", a.requireAuth(a.cancelItem))
 	mux.HandleFunc("POST /api/items/{id}/like", a.requireAuth(a.toggleLike))
 	mux.HandleFunc("POST /api/items/{id}/purchase", a.requireAuth(a.purchaseItem))
+	mux.HandleFunc("GET /api/items/{id}/reviews", a.listItemReviews)
+	mux.HandleFunc("POST /api/items/{id}/reviews", a.requireAuth(a.createUserReview))
+	mux.HandleFunc("GET /api/users/{id}/reviews", a.listUserReviews)
 	mux.HandleFunc("GET /api/conversations", a.requireAuth(a.listConversations))
 	mux.HandleFunc("POST /api/conversations", a.requireAuth(a.createConversation))
 	mux.HandleFunc("GET /api/conversations/{id}/messages", a.requireAuth(a.listMessages))
@@ -478,9 +497,12 @@ func (a *app) listItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := a.dbHandle().QueryContext(r.Context(), `
-		SELECT i.id, i.seller_id, u.name, i.title, i.description, i.category, i.price, i.status,
+		SELECT i.id, i.seller_id, u.name,
+		       COALESCE((SELECT AVG(rating) FROM user_reviews WHERE reviewee_id = i.seller_id), 0),
+		       (SELECT COUNT(*) FROM user_reviews WHERE reviewee_id = i.seller_id),
+		       i.title, i.description, i.category, i.price, i.status,
 		       COALESCE((SELECT image_url FROM item_images WHERE item_id = i.id ORDER BY sort_order LIMIT 1), ''),
-		       COUNT(l.item_id), i.created_at
+		       COUNT(DISTINCT l.user_id), i.created_at
 		FROM items i
 		JOIN users u ON u.id = i.seller_id
 		LEFT JOIN likes l ON l.item_id = i.id
@@ -497,7 +519,7 @@ func (a *app) listItems(w http.ResponseWriter, r *http.Request) {
 	items := []item{}
 	for rows.Next() {
 		var it item
-		if err := rows.Scan(&it.ID, &it.SellerID, &it.SellerName, &it.Title, &it.Description, &it.Category, &it.Price, &it.Status, &it.ImageURL, &it.LikeCount, &it.CreatedAt); err != nil {
+		if err := rows.Scan(&it.ID, &it.SellerID, &it.SellerName, &it.SellerRatingAvg, &it.SellerReviewCount, &it.Title, &it.Description, &it.Category, &it.Price, &it.Status, &it.ImageURL, &it.LikeCount, &it.CreatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read item")
 			return
 		}
@@ -513,9 +535,12 @@ func (a *app) listItems(w http.ResponseWriter, r *http.Request) {
 func (a *app) listMyItems(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	rows, err := a.dbHandle().QueryContext(r.Context(), `
-		SELECT i.id, i.seller_id, usr.name, i.title, i.description, i.category, i.price, i.status,
+		SELECT i.id, i.seller_id, usr.name,
+		       COALESCE((SELECT AVG(rating) FROM user_reviews WHERE reviewee_id = i.seller_id), 0),
+		       (SELECT COUNT(*) FROM user_reviews WHERE reviewee_id = i.seller_id),
+		       i.title, i.description, i.category, i.price, i.status,
 		       COALESCE((SELECT image_url FROM item_images WHERE item_id = i.id ORDER BY sort_order LIMIT 1), ''),
-		       COUNT(l.item_id), i.created_at
+		       COUNT(DISTINCT l.user_id), i.created_at
 		FROM items i
 		JOIN users usr ON usr.id = i.seller_id
 		LEFT JOIN likes l ON l.item_id = i.id
@@ -531,7 +556,7 @@ func (a *app) listMyItems(w http.ResponseWriter, r *http.Request) {
 	items := []item{}
 	for rows.Next() {
 		var it item
-		if err := rows.Scan(&it.ID, &it.SellerID, &it.SellerName, &it.Title, &it.Description, &it.Category, &it.Price, &it.Status, &it.ImageURL, &it.LikeCount, &it.CreatedAt); err != nil {
+		if err := rows.Scan(&it.ID, &it.SellerID, &it.SellerName, &it.SellerRatingAvg, &it.SellerReviewCount, &it.Title, &it.Description, &it.Category, &it.Price, &it.Status, &it.ImageURL, &it.LikeCount, &it.CreatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read item")
 			return
 		}
@@ -544,6 +569,7 @@ func (a *app) createUploadURL(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Filename    string `json:"filename"`
 		ContentType string `json:"contentType"`
+		Purpose     string `json:"purpose"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -555,7 +581,8 @@ func (a *app) createUploadURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	signed, publicURL, err := signedGCSUploadURL(req.Filename, req.ContentType)
+	prefix := uploadPrefix(req.Purpose)
+	signed, publicURL, err := signedGCSUploadURL(prefix, req.Filename, req.ContentType)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -756,6 +783,97 @@ func (a *app) purchaseItem(w http.ResponseWriter, r *http.Request) {
 	}
 	purchaseID, _ := res.LastInsertId()
 	writeJSON(w, http.StatusCreated, map[string]any{"purchaseId": purchaseID, "status": "completed"})
+}
+
+func (a *app) createUserReview(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	itemID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Rating  int    `json:"rating"`
+		Comment string `json:"comment"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	req.Comment = strings.TrimSpace(req.Comment)
+	if req.Rating < 1 || req.Rating > 5 || req.Comment == "" {
+		writeError(w, http.StatusBadRequest, "rating between 1 and 5 and comment are required")
+		return
+	}
+
+	var purchaseID, buyerID, sellerID int64
+	err := a.dbHandle().QueryRowContext(r.Context(), `
+		SELECT id, buyer_id, seller_id
+		FROM purchases
+		WHERE item_id = ? AND status = 'completed'
+		ORDER BY created_at DESC
+		LIMIT 1`, itemID,
+	).Scan(&purchaseID, &buyerID, &sellerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "completed purchase not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load purchase")
+		return
+	}
+
+	var revieweeID int64
+	switch u.ID {
+	case buyerID:
+		revieweeID = sellerID
+	case sellerID:
+		revieweeID = buyerID
+	default:
+		writeError(w, http.StatusForbidden, "only buyer or seller can review this transaction")
+		return
+	}
+
+	res, err := a.dbHandle().ExecContext(r.Context(), `
+		INSERT INTO user_reviews (purchase_id, item_id, reviewer_id, reviewee_id, rating, comment)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		purchaseID, itemID, u.ID, revieweeID, req.Rating, req.Comment,
+	)
+	if err != nil {
+		writeError(w, http.StatusConflict, "you have already reviewed this transaction")
+		return
+	}
+	reviewID, _ := res.LastInsertId()
+	review, err := a.findUserReview(r.Context(), reviewID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load review")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"review": review})
+}
+
+func (a *app) listItemReviews(w http.ResponseWriter, r *http.Request) {
+	itemID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	reviews, err := a.queryReviews(r.Context(), "ur.item_id = ?", itemID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load reviews")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reviews": reviews})
+}
+
+func (a *app) listUserReviews(w http.ResponseWriter, r *http.Request) {
+	userID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	reviews, err := a.queryReviews(r.Context(), "ur.reviewee_id = ?", userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load reviews")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reviews": reviews})
 }
 
 func (a *app) createConversation(w http.ResponseWriter, r *http.Request) {
@@ -993,14 +1111,62 @@ func (a *app) suggestPrice(w http.ResponseWriter, r *http.Request) {
 func (a *app) findItem(ctx context.Context, id int64) (item, error) {
 	var it item
 	err := a.dbHandle().QueryRowContext(ctx, `
-		SELECT i.id, i.seller_id, u.name, i.title, i.description, i.category, i.price, i.status,
+		SELECT i.id, i.seller_id, u.name,
+		       COALESCE((SELECT AVG(rating) FROM user_reviews WHERE reviewee_id = i.seller_id), 0),
+		       (SELECT COUNT(*) FROM user_reviews WHERE reviewee_id = i.seller_id),
+		       i.title, i.description, i.category, i.price, i.status,
 		       COALESCE((SELECT image_url FROM item_images WHERE item_id = i.id ORDER BY sort_order LIMIT 1), ''),
 		       (SELECT COUNT(*) FROM likes WHERE item_id = i.id), i.created_at
 		FROM items i
 		JOIN users u ON u.id = i.seller_id
 		WHERE i.id = ?`, id,
-	).Scan(&it.ID, &it.SellerID, &it.SellerName, &it.Title, &it.Description, &it.Category, &it.Price, &it.Status, &it.ImageURL, &it.LikeCount, &it.CreatedAt)
+	).Scan(&it.ID, &it.SellerID, &it.SellerName, &it.SellerRatingAvg, &it.SellerReviewCount, &it.Title, &it.Description, &it.Category, &it.Price, &it.Status, &it.ImageURL, &it.LikeCount, &it.CreatedAt)
 	return it, err
+}
+
+func (a *app) findUserReview(ctx context.Context, id int64) (userReview, error) {
+	reviews, err := a.queryReviews(ctx, "ur.id = ?", id)
+	if err != nil {
+		return userReview{}, err
+	}
+	if len(reviews) == 0 {
+		return userReview{}, sql.ErrNoRows
+	}
+	return reviews[0], nil
+}
+
+func (a *app) queryReviews(ctx context.Context, condition string, args ...any) ([]userReview, error) {
+	rows, err := a.dbHandle().QueryContext(ctx, `
+		SELECT ur.id, ur.purchase_id, ur.item_id, i.title,
+		       ur.reviewer_id, reviewer.name,
+		       ur.reviewee_id, reviewee.name,
+		       ur.rating, ur.comment, ur.created_at
+		FROM user_reviews ur
+		JOIN items i ON i.id = ur.item_id
+		JOIN users reviewer ON reviewer.id = ur.reviewer_id
+		JOIN users reviewee ON reviewee.id = ur.reviewee_id
+		WHERE `+condition+`
+		ORDER BY ur.created_at DESC
+		LIMIT 50`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	reviews := []userReview{}
+	for rows.Next() {
+		var review userReview
+		if err := rows.Scan(
+			&review.ID, &review.PurchaseID, &review.ItemID, &review.ItemTitle,
+			&review.ReviewerID, &review.ReviewerName,
+			&review.RevieweeID, &review.RevieweeName,
+			&review.Rating, &review.Comment, &review.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		reviews = append(reviews, review)
+	}
+	return reviews, rows.Err()
 }
 
 func (a *app) findUserByID(ctx context.Context, id int64) (user, error) {
@@ -1212,11 +1378,12 @@ func (a *app) hashPassword(password string) string {
 func (a *app) signToken(u user) string {
 	header := base64JSON(map[string]string{"alg": "HS256", "typ": "JWT"})
 	payload := base64JSON(map[string]any{
-		"sub":   u.ID,
-		"name":  u.Name,
-		"email": u.Email,
-		"role":  u.Role,
-		"exp":   time.Now().Add(24 * time.Hour).Unix(),
+		"sub":       u.ID,
+		"name":      u.Name,
+		"email":     u.Email,
+		"role":      u.Role,
+		"avatarUrl": u.AvatarURL,
+		"exp":       time.Now().Add(24 * time.Hour).Unix(),
 	})
 	unsigned := header + "." + payload
 	return unsigned + "." + hmacSHA256(unsigned, a.jwtSecret)
@@ -1236,11 +1403,12 @@ func (a *app) verifyToken(token string) (user, error) {
 		return user{}, err
 	}
 	var claims struct {
-		Sub   int64  `json:"sub"`
-		Name  string `json:"name"`
-		Email string `json:"email"`
-		Role  string `json:"role"`
-		Exp   int64  `json:"exp"`
+		Sub       int64  `json:"sub"`
+		Name      string `json:"name"`
+		Email     string `json:"email"`
+		Role      string `json:"role"`
+		AvatarURL string `json:"avatarUrl"`
+		Exp       int64  `json:"exp"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return user{}, err
@@ -1248,7 +1416,7 @@ func (a *app) verifyToken(token string) (user, error) {
 	if time.Now().Unix() > claims.Exp {
 		return user{}, errors.New("token expired")
 	}
-	return user{ID: claims.Sub, Name: claims.Name, Email: claims.Email, Role: claims.Role}, nil
+	return user{ID: claims.Sub, Name: claims.Name, Email: claims.Email, Role: claims.Role, AvatarURL: claims.AvatarURL}, nil
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -1265,10 +1433,25 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 	}
-	if _, err := db.ExecContext(ctx, "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT NULL AFTER role"); err != nil {
+	return ensureColumn(ctx, db, "users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url TEXT NULL AFTER role")
+}
+
+func ensureColumn(ctx context.Context, db *sql.DB, table string, column string, alterSQL string) error {
+	var exists int
+	err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+		table, column,
+	).Scan(&exists)
+	if err != nil {
 		return err
 	}
-	return nil
+	if exists > 0 {
+		return nil
+	}
+	_, err = db.ExecContext(ctx, alterSQL)
+	return err
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -1320,7 +1503,7 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-func signedGCSUploadURL(filename string, contentType string) (string, string, error) {
+func signedGCSUploadURL(prefix string, filename string, contentType string) (string, string, error) {
 	bucket := strings.TrimSpace(os.Getenv("GCS_BUCKET"))
 	clientEmail := strings.TrimSpace(os.Getenv("GCS_CLIENT_EMAIL"))
 	privateKeyText := strings.TrimSpace(os.Getenv("GCS_PRIVATE_KEY"))
@@ -1336,7 +1519,7 @@ func signedGCSUploadURL(filename string, contentType string) (string, string, er
 	now := time.Now().UTC()
 	datestamp := now.Format("20060102")
 	timestamp := now.Format("20060102T150405Z")
-	objectName := fmt.Sprintf("items/%s-%s", now.Format("20060102150405"), sanitizeObjectName(filename))
+	objectName := fmt.Sprintf("%s/%s-%s", prefix, now.Format("20060102150405"), sanitizeObjectName(filename))
 	credentialScope := datestamp + "/auto/storage/goog4_request"
 	credential := clientEmail + "/" + credentialScope
 	expires := "900"
@@ -1374,6 +1557,15 @@ func signedGCSUploadURL(filename string, contentType string) (string, string, er
 	publicURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucket, escapeObjectPath(objectName))
 	uploadURL := fmt.Sprintf("https://storage.googleapis.com/%s%s?%s", bucket, escapedObject, query.Encode())
 	return uploadURL, publicURL, nil
+}
+
+func uploadPrefix(purpose string) string {
+	switch strings.ToLower(strings.TrimSpace(purpose)) {
+	case "avatar", "avatars", "profile":
+		return "avatars"
+	default:
+		return "items"
+	}
 }
 
 func parseRSAPrivateKey(value string) (*rsa.PrivateKey, error) {

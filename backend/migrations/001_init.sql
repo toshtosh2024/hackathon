@@ -110,3 +110,22 @@ CREATE TABLE IF NOT EXISTS item_moderations (
   CONSTRAINT fk_item_moderations_item FOREIGN KEY (item_id) REFERENCES items(id),
   CONSTRAINT fk_item_moderations_user FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+CREATE TABLE IF NOT EXISTS user_reviews (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  purchase_id BIGINT NOT NULL,
+  item_id BIGINT NOT NULL,
+  reviewer_id BIGINT NOT NULL,
+  reviewee_id BIGINT NOT NULL,
+  rating TINYINT NOT NULL,
+  comment TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_user_reviews_purchase_reviewer (purchase_id, reviewer_id),
+  INDEX idx_user_reviews_reviewee_created_at (reviewee_id, created_at),
+  INDEX idx_user_reviews_item_id (item_id),
+  CONSTRAINT fk_user_reviews_purchase FOREIGN KEY (purchase_id) REFERENCES purchases(id),
+  CONSTRAINT fk_user_reviews_item FOREIGN KEY (item_id) REFERENCES items(id),
+  CONSTRAINT fk_user_reviews_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id),
+  CONSTRAINT fk_user_reviews_reviewee FOREIGN KEY (reviewee_id) REFERENCES users(id),
+  CONSTRAINT chk_user_reviews_rating CHECK (rating BETWEEN 1 AND 5)
+);

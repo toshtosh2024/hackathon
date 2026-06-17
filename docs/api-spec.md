@@ -61,6 +61,8 @@ Response:
       "id": 1,
       "sellerId": 1,
       "sellerName": "Toshi",
+      "sellerRatingAvg": 4.8,
+      "sellerReviewCount": 12,
       "title": "Vintage Jacket",
       "description": "Clean jacket in good condition.",
       "category": "fashion",
@@ -109,9 +111,12 @@ Request:
 ```json
 {
   "filename": "bag.jpg",
-  "contentType": "image/jpeg"
+  "contentType": "image/jpeg",
+  "purpose": "item"
 }
 ```
+
+`purpose` is optional. Use `item` for listing images and `avatar` for profile images. Objects are stored under matching Cloud Storage prefixes.
 
 Response:
 
@@ -145,6 +150,29 @@ Toggles a like and returns the current state.
 Authorization: `Bearer <token>`
 
 Marks an active item as sold.
+
+### GET /items/{id}/reviews
+
+Returns reviews associated with a completed transaction for the item.
+
+### POST /items/{id}/reviews
+
+Authorization: `Bearer <token>`
+
+Creates one review for the completed transaction. Only the buyer or seller can review the counterpart, and each side can review once.
+
+Request:
+
+```json
+{
+  "rating": 5,
+  "comment": "Smooth and reliable transaction."
+}
+```
+
+### GET /users/{id}/reviews
+
+Returns reviews received by the user.
 
 ## Messages
 

@@ -125,7 +125,7 @@ resource "google_sql_database_instance" "mysql" {
     tier              = "db-f1-micro"
     availability_type = "ZONAL"
     disk_type         = "PD_SSD"
-    disk_size         = 10
+    disk_size         = 30
     disk_autoresize   = true
 
     backup_configuration {
@@ -201,6 +201,12 @@ resource "google_storage_bucket_iam_member" "cloud_run_upload_object_creator" {
   bucket = google_storage_bucket.uploads.name
   role   = "roles/storage.objectCreator"
   member = "serviceAccount:${google_service_account.cloud_run.email}"
+}
+
+resource "google_storage_bucket_iam_member" "public_upload_object_viewer" {
+  bucket = google_storage_bucket.uploads.name
+  role   = "roles/storage.objectViewer"
+  member = "allUsers"
 }
 
 resource "google_project_iam_member" "cloud_build_run_admin" {
