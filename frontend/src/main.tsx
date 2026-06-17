@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import React, { useState, useEffect, useRef, FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bot,
@@ -25,125 +25,15 @@ import {
   Users,
   WalletCards
 } from "lucide-react";
-import "./styles.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? "http://localhost:8080/api" : "/api");
+// Import modular types and components
+import { User, Item, Conversation, Message, UserReview, ItemScene, Route, NavPage, NavItem, PersonalStats } from "./types";
+import { StripePaymentModal } from "./StripePaymentModal";
+import { HelpScreen } from "./HelpScreen";
+import { AdminDashboardScreen } from "./AdminDashboardScreen";
+import { MyPageScreen } from "./MyPageScreen";
 
-type User = {
-  id: number;
-  name: string;
-  email: string;
-  role: string;
-  avatarUrl: string;
-};
-
-type Item = {
-  id: number;
-  sellerId: number;
-  sellerName: string;
-  sellerRatingAvg: number;
-  sellerReviewCount: number;
-  title: string;
-  description: string;
-  category: string;
-  price: number;
-  minPrice?: number;
-  aiPersonality?: string;
-  isBarter?: boolean;
-  wantedCategory?: string;
-  status: "active" | "sold" | "hidden";
-  imageUrl: string;
-  likeCount: number;
-  createdAt: string;
-};
-
-type ItemScene = {
-  imageUrl: string;
-  prompt: string;
-  createdAt: string;
-  isPersonal: boolean;
-};
-
-type Conversation = {
-  id: number;
-  itemId: number;
-  itemTitle: string;
-  itemPrice: number;
-  itemStatus: "active" | "sold" | "hidden";
-  itemImageUrl: string;
-  itemCategory: string;
-  buyerId: number;
-  sellerId: number;
-  counterpartId: number;
-  counterpartName: string;
-  counterpartAvatarUrl: string;
-  purchaseId?: number;
-  purchaseStatus?: string;
-  updatedAt: string;
-};
-
-type Message = {
-  id: number;
-  conversationId: number;
-  senderId: number;
-  body: string;
-  createdAt: string;
-};
-
-type UserReview = {
-  id: number;
-  purchaseId: number;
-  itemId: number;
-  itemTitle: string;
-  reviewerId: number;
-  reviewerName: string;
-  revieweeId: number;
-  revieweeName: string;
-  rating: number;
-  comment: string;
-  createdAt: string;
-};
-
-type ItemReview = {
-  prohibited: boolean;
-  riskLevel: "low" | "medium" | "high";
-  reasons: string[];
-  blockedKeywords: string[];
-};
-
-type PriceSuggestion = {
-  price: number;
-  minPrice: number;
-  maxPrice: number;
-  reason: string;
-  signals: string[];
-};
-
-type Route =
-  | { page: "auth" }
-  | { page: "home" }
-  | { page: "sell" }
-  | { page: "messages" }
-  | { page: "mypage" }
-  | { page: "item"; itemId: number }
-  | { page: "admin"; subpage: "stats" | "moderations" | "users" }
-  | { page: "help" };
-
-type NavPage = "home" | "sell" | "messages" | "mypage" | "help";
-
-type NavItem = {
-  page: NavPage;
-  label: string;
-  icon: typeof Home;
-};
-
-const PRIMARY_NAV: NavItem[] = [
-  { page: "home", label: "ホーム", icon: Home },
-  { page: "sell", label: "出品", icon: PackagePlus },
-  { page: "messages", label: "DM", icon: MessageCircle },
-  { page: "mypage", label: "マイページ", icon: UserCircle2 },
-  { page: "help", label: "ヘルプ", icon: HelpCircle }
-];
+const API_BASE = "/api";
 
 function MarkdownBlock({ text, className }: { text: string; className?: string }) {
   return <div className={className ? `markdown-block ${className}` : "markdown-block"} dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
@@ -162,54 +52,51 @@ function IconLabel({
 }) {
   return (
     <span className={className ? `icon-label ${className}` : "icon-label"}>
-      <Icon size={20} />
-      {value !== undefined ? <strong>{value}</strong> : null}
-      <small>{label}</small>
+      <Icon size={16} />
+      <span>{label}</span>
+      {value !== undefined && <strong style={{ marginLeft: "4px" }}>{value}</strong>}
     </span>
   );
 }
 
+const PRIMARY_NAV: NavItem[] = [
+  { page: "home", label: "ホーム", icon: Home },
+  { page: "sell", label: "出品", icon: PackagePlus },
+  { page: "messages", label: "DM", icon: MessageCircle },
+  { page: "mypage", label: "マイページ", icon: UserCircle2 },
+  { page: "help", label: "ヘルプ", icon: HelpCircle }
+];
+
+const CATEGORIES = ["家電・スマホ", "衣服・ファッション", "本・ゲーム・エンタメ", "おもちゃ・ホビー", "スポーツ・レジャー", "ハンドメイド", "その他"];
+
 function App() {
   const [token, setToken] = useState(localStorage.getItem("token") ?? "");
-  const [user, setUser] = useState<User | null>(loadUser());
-  const [route, setRoute] = useState<Route>(() => normalizeRoute(readRoute(), Boolean(localStorage.getItem("token"))));
+  const [user, setUser] = useState<User | null>(() => {
+    const raw = localStorage.getItem("user");
+    return raw ? JSON.parse(raw) as User : null;
+  });
+
+  const [route, setRoute] = useState<Route>(readRoute);
+  const [notice, setNotice] = useState("");
+
   const [items, setItems] = useState<Item[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsError, setItemsError] = useState("");
+  const [itemFilters, setItemFilters] = useState({ q: "", category: "", min_price: "", max_price: "" });
+
+  const [myItems, setMyItems] = useState<Item[]>([]);
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [notice, setNotice] = useState("");
-  const [itemFilters, setItemFilters] = useState({ q: "", category: "", minPrice: "", maxPrice: "" });
-  const [itemsLoading, setItemsLoading] = useState(false);
-  const [itemsError, setItemsError] = useState("");
-  const [myItems, setMyItems] = useState<Item[]>([]);
 
   useEffect(() => {
-    void loadItems(itemFilters);
-  }, [itemFilters]);
-
-  useEffect(() => {
-    if (!token) {
-      setConversations([]);
-      setMessages([]);
-      setSelectedConversationId(null);
-      setMyItems([]);
-      return;
+    function syncRoute() {
+      setRoute(readRoute());
     }
-    void loadConversations();
-    void loadMyItems();
-  }, [token]);
-
-  useEffect(() => {
-    const syncRoute = () => setRoute(normalizeRoute(readRoute(), Boolean(token)));
     window.addEventListener("hashchange", syncRoute);
     syncRoute();
     return () => window.removeEventListener("hashchange", syncRoute);
-  }, [token]);
-
-  useEffect(() => {
-    if (!token) {
-      navigate({ page: "auth" });
-    }
   }, [token]);
 
   const selectedItem = route.page === "item" ? items.find((item) => item.id === route.itemId) ?? null : null;
@@ -231,17 +118,17 @@ function App() {
   async function loadItems(filters = itemFilters) {
     setItemsLoading(true);
     setItemsError("");
-    const params = new URLSearchParams();
-    if (filters.q.trim()) params.set("q", filters.q.trim());
-    if (filters.category.trim()) params.set("category", filters.category.trim());
-    if (filters.minPrice.trim()) params.set("min_price", filters.minPrice.trim());
-    if (filters.maxPrice.trim()) params.set("max_price", filters.maxPrice.trim());
-    const query = params.toString();
     try {
-      const data = await api<{ items: Item[] }>(`/items${query ? `?${query}` : ""}`);
+      const query = new URLSearchParams();
+      if (filters.q) query.set("q", filters.q);
+      if (filters.category) query.set("category", filters.category);
+      if (filters.min_price) query.set("min_price", filters.min_price);
+      if (filters.max_price) query.set("max_price", filters.max_price);
+
+      const data = await api<{ items: Item[] }>(`/items?${query.toString()}`);
       setItems(data.items);
-    } catch (err) {
-      setItemsError(err instanceof Error ? err.message : "商品一覧の読み込みに失敗しました");
+    } catch {
+      setItemsError("商品一覧の読み込みに失敗しました");
     } finally {
       setItemsLoading(false);
     }
@@ -250,9 +137,6 @@ function App() {
   async function loadConversations() {
     const data = await api<{ conversations: Conversation[] }>("/conversations");
     setConversations(data.conversations);
-    if (data.conversations.length > 0) {
-      setSelectedConversationId((current) => current ?? data.conversations[0].id);
-    }
   }
 
   async function loadMyItems() {
@@ -261,93 +145,89 @@ function App() {
   }
 
   async function loadMessages(conversationId: number) {
-    setSelectedConversationId(conversationId);
     const data = await api<{ messages: Message[] }>(`/conversations/${conversationId}/messages`);
     setMessages(data.messages);
+    setSelectedConversationId(conversationId);
   }
 
-  function saveSession(nextToken: string, nextUser: User) {
+  async function refreshItemsAndKeepSelection(itemId: number) {
+    await loadItems(itemFilters);
+  }
+
+  useEffect(() => {
+    if (!token) return;
+    void loadItems(itemFilters);
+    void loadConversations();
+    void loadMyItems();
+  }, [token]);
+
+  const updateSession = (nextToken: string, nextUser: User) => {
     setToken(nextToken);
     setUser(nextUser);
     localStorage.setItem("token", nextToken);
     localStorage.setItem("user", JSON.stringify(nextUser));
     setNotice(`${nextUser.name} さん、ようこそ`);
     navigate({ page: "home" });
-  }
+  };
 
-  function updateSession(nextToken: string, nextUser: User) {
-    setToken(nextToken);
-    setUser(nextUser);
-    localStorage.setItem("token", nextToken);
-    localStorage.setItem("user", JSON.stringify(nextUser));
-  }
-
-  function logout() {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+  const logout = () => {
     setToken("");
     setUser(null);
-    setNotice("ログアウトしました");
-    navigate({ page: "auth" });
-  }
-
-  async function refreshItemsAndKeepSelection(itemId?: number) {
-    await loadItems(itemFilters);
-    if (token) {
-      await loadMyItems();
-    }
-    if (itemId) {
-      navigate({ page: "item", itemId });
-    }
-  }
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setRoute({ page: "auth" });
+  };
 
   return (
-    <main className={route.page === "auth" ? "app-shell auth-shell" : "app-shell"}>
+    <main className="app-shell">
+      {notice && (
+        <div className="system-notice" style={{ animation: "sparkleGlow 1s alternate" }}>
+          <span>{notice}</span>
+          <button onClick={() => setNotice("")}>✕</button>
+        </div>
+      )}
+
+      {user && (
+        <header className="app-header">
+          <h1 className="logo-brand" onClick={() => navigate({ page: "home" })}>
+            <Store size={22} style={{ color: "#d85b46" }} /> Next Market <small style={{ fontSize: "11px", color: "#d85b46", marginLeft: "4px" }}>AI & Escrow</small>
+          </h1>
+          <div className="session-panel">
+            <span className="session-role">{user.role === "admin" ? "🛡️ 管理者" : "👤 一般会員"}</span>
+            <img src={user.avatarUrl || "/placeholder-avatar.svg"} alt="" className="session-avatar" />
+            <span className="session-name">{user.name}</span>
+            <button className="ghost-button" onClick={logout}>
+              <IconLabel icon={LogOut} label="終了" />
+            </button>
+          </div>
+        </header>
+      )}
+
       {route.page === "auth" ? (
-        <AuthScreen api={api} onAuth={saveSession} notice={notice} />
+        <AuthScreen onSessionUpdated={updateSession} notice={notice} />
       ) : (
         <>
-          <header className="topbar">
-            <div>
-              <p className="eyebrow">Next Market</p>
-              <h1>売る。見る。話す。</h1>
-            </div>
-            <div className="session-card">
-              <IconLabel icon={UserCircle2} label={user?.name ?? "User"} value={user?.email?.split("@")[0] ?? ""} className="session-badge" />
-              <button className="ghost-button" onClick={logout}>
-                <IconLabel icon={LogOut} label="終了" />
-              </button>
-            </div>
-          </header>
-
-          <Navigation route={route} user={user} />
-
-          {notice && <p className="notice">{notice}</p>}
-
           {route.page === "home" && (
             <HomeScreen
               items={items}
+              itemsLoading={itemsLoading}
+              itemsError={itemsError}
               filters={itemFilters}
-              loading={itemsLoading}
-              error={itemsError}
-              activeCount={activeCount}
-              soldCount={soldCount}
-              likedTotal={likedTotal}
-              onFilterChange={setItemFilters}
+              onFiltersChange={(f) => {
+                setItemFilters(f);
+                void loadItems(f);
+              }}
               onOpenItem={(itemId) => navigate({ page: "item", itemId })}
-              onOpenSell={() => navigate({ page: "sell" })}
-              onOpenMessages={() => navigate({ page: "messages" })}
             />
           )}
 
           {route.page === "sell" && (
-            <CreateItemScreen
+            <SellScreen
               api={api}
-              onCreated={(item) => {
-                setItems((current) => [item, ...current]);
-                void loadMyItems();
-                setNotice("商品を出品しました");
-                navigate({ page: "item", itemId: item.id });
+              onCreated={async (item) => {
+                await Promise.all([loadItems(itemFilters), loadMyItems()]);
+                setNotice(`出品しました: ${item.title}`);
+                navigate({ page: "home" });
               }}
             />
           )}
@@ -412,68 +292,130 @@ function App() {
             />
           )}
 
-          {route.page === "help" && (
-            <HelpScreen onOpenSell={() => navigate({ page: "sell" })} />
-          )}
+          {route.page === "help" && <HelpScreen />}
         </>
+      )}
+
+      {user && (
+        <nav className="footer-nav">
+          {PRIMARY_NAV.map((nav) => (
+            <button
+              key={nav.page}
+              className={route.page === nav.page ? "nav-link active" : "nav-link"}
+              onClick={() => navigate({ page: nav.page })}
+            >
+              <nav.icon size={20} />
+              <span>{nav.label}</span>
+            </button>
+          ))}
+        </nav>
       )}
     </main>
   );
 }
 
+function readRoute(): Route {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (hash === "sell") return { page: "sell" };
+  if (hash === "messages") return { page: "messages" };
+  if (hash === "mypage") return { page: "mypage" };
+  if (hash === "help") return { page: "help" };
+  if (hash.startsWith("item/")) {
+    const itemId = Number(hash.split("/")[1]);
+    if (Number.isFinite(itemId)) {
+      return { page: "item", itemId };
+    }
+  }
+  if (hash.startsWith("admin/")) {
+    const sub = hash.split("/")[1] as "stats" | "moderations" | "users";
+    if (sub === "stats" || sub === "moderations" || sub === "users") {
+      return { page: "admin", subpage: sub };
+    }
+    return { page: "admin", subpage: "stats" };
+  }
+  if (hash === "admin") {
+    return { page: "admin", subpage: "stats" };
+  }
+  if (hash === "home") return { page: "home" };
+  return { page: "auth" };
+}
+
+function normalizeRoute(route: Route, authenticated: boolean): Route {
+  if (!authenticated) return { page: "auth" };
+  return route.page === "auth" ? { page: "home" } : route;
+}
+
+function navigate(route: Route) {
+  const hash =
+    route.page === "item"
+      ? `item/${route.itemId}`
+      : route.page === "admin"
+        ? `admin/${route.subpage}`
+        : route.page;
+  window.location.hash = hash;
+}
+
+function formatDate(value: string | Date) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value.toString() : date.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
+}
+
+function statusLabel(status: Item["status"] | Conversation["itemStatus"]) {
+  if (status === "sold") return "売却済み";
+  if (status === "hidden") return "公開停止";
+  return "販売中";
+}
+
 function AuthScreen({
-  api,
-  onAuth,
+  onSessionUpdated,
   notice
 }: {
-  api: <T>(path: string, options?: RequestInit) => Promise<T>;
-  onAuth: (token: string, user: User) => void;
+  onSessionUpdated: (token: string, user: User) => void;
   notice: string;
 }) {
   const [mode, setMode] = useState<"login" | "register">("register");
   const [name, setName] = useState("Toshi");
   const [email, setEmail] = useState("toshi@example.com");
-  const [password, setPassword] = useState("password");
+  const [password, setPassword] = useState("secret");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  const submit = async (event: FormEvent) => {
+    e_prevent(event);
+    setLoading(true);
     setError("");
     try {
-      const data = await api<{ token: string; user: User }>(`/auth/${mode}`, {
+      const endpoint = mode === "register" ? "/auth/register" : "/auth/login";
+      const payload = mode === "register" ? { name, email, password } : { email, password };
+      const response = await fetch(`${API_BASE}${endpoint}`, {
         method: "POST",
-        body: JSON.stringify(mode === "register" ? { name, email, password } : { email, password })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
       });
-      onAuth(data.token, data.user);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error ?? "API auth failure");
+      }
+      onSessionUpdated(data.token, data.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : "認証に失敗しました");
+    } finally {
+      setLoading(false);
     }
-  }
+  };
+
+  const e_prevent = (e: FormEvent) => e.preventDefault();
 
   return (
-    <section className="auth-layout">
-      <div className="auth-hero">
-        <p className="eyebrow">Next Market</p>
-        <h1>フリマ体験を、最初の一画面から整える。</h1>
-        <div className="auth-points">
-          <article>
-            <IconLabel icon={Store} label="探す" />
-          </article>
-          <article>
-            <IconLabel icon={PackagePlus} label="売る" />
-          </article>
-          <article>
-            <IconLabel icon={MessageCircle} label="話す" />
-          </article>
-        </div>
+    <section className="screen auth-screen">
+      <div className="auth-brand">
+        <Store size={48} style={{ color: "#d85b46", marginBottom: "8px" }} />
+        <h1>Next Market</h1>
+        <p className="subtitle">AI & Stripeエスクロー搭載・次世代型マーケットプレイス</p>
       </div>
 
-      <section className="auth-card panel">
-        <div className="panel-heading">
-          <LogIn size={20} />
-          <h2>{mode === "register" ? "新規登録" : "ログイン"}</h2>
-        </div>
-        <div className="segmented">
+      <article className="panel auth-panel">
+        <div className="tab-buttons">
           <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>
             新規登録
           </button>
@@ -481,456 +423,329 @@ function AuthScreen({
             ログイン
           </button>
         </div>
-        <form onSubmit={submit}>
-          {mode === "register" && <input value={name} onChange={(e) => setName(e.target.value)} placeholder="名前" />}
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="メール" />
-          <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="パスワード" type="password" />
-          <button className="primary-button" type="submit">
-            <LogIn size={18} />
-            {mode === "register" ? "登録してはじめる" : "ログインしてホームへ"}
+
+        <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {mode === "register" && (
+            <div className="input-group">
+              <label>お名前</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} required />
+            </div>
+          )}
+          <div className="input-group">
+            <label>メールアドレス</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </div>
+          <div className="input-group">
+            <label>パスワード (6文字以上)</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </div>
+          <button className="primary-button" disabled={loading} type="submit" style={{ padding: "14px" }}>
+            {loading ? "通信中..." : mode === "register" ? "無料でアカウントを作成" : "ログインする"}
           </button>
         </form>
-        {notice && <p className="notice inline-notice">{notice}</p>}
-        {error && <p className="error">{error}</p>}
-      </section>
-    </section>
-  );
-}
 
-function Navigation({ route, user }: { route: Route; user: User | null }) {
-  return (
-    <nav className="nav-bar">
-      {PRIMARY_NAV.map((item) => {
-        const Icon = item.icon;
-        const active = route.page === item.page;
-        return (
-          <button key={item.page} className={active ? "nav-link active" : "nav-link"} onClick={() => navigate({ page: item.page })}>
-            <IconLabel icon={Icon} label={item.label} />
-          </button>
-        );
-      })}
-      {user?.role === "admin" && (
-        <button className={route.page === "admin" ? "nav-link active" : "nav-link"} onClick={() => navigate({ page: "admin", subpage: "stats" })}>
-          <IconLabel icon={ShieldAlert} label="管理画面" />
-        </button>
-      )}
-    </nav>
+        {error && <p className="error">{error}</p>}
+        {notice && <p className="notice inline-notice">{notice}</p>}
+      </article>
+    </section>
   );
 }
 
 function HomeScreen({
   items,
+  itemsLoading,
+  itemsError,
   filters,
-  loading,
-  error,
-  activeCount,
-  soldCount,
-  likedTotal,
-  onFilterChange,
-  onOpenItem,
-  onOpenSell,
-  onOpenMessages
+  onFiltersChange,
+  onOpenItem
 }: {
   items: Item[];
-  filters: { q: string; category: string; minPrice: string; maxPrice: string };
-  loading: boolean;
-  error: string;
-  activeCount: number;
-  soldCount: number;
-  likedTotal: number;
-  onFilterChange: (filters: { q: string; category: string; minPrice: string; maxPrice: string }) => void;
+  itemsLoading: boolean;
+  itemsError: string;
+  filters: { q: string; category: string; min_price: string; max_price: string };
+  onFiltersChange: (filters: { q: string; category: string; min_price: string; max_price: string }) => void;
   onOpenItem: (itemId: number) => void;
-  onOpenSell: () => void;
-  onOpenMessages: () => void;
 }) {
-  const leadItem = items[0] ?? null;
-  const latestItems = items.slice(0, 6);
-
   return (
-    <section className="page-shell home-shell">
-      <div className="hero-card panel">
-        <div className="hero-copy">
-          <p className="eyebrow">Marketplace Home</p>
-          <h2>ホーム</h2>
-          <div className="hero-actions">
-            <button className="primary-button" onClick={onOpenSell}>
-              <IconLabel icon={PackagePlus} label="出品" />
-            </button>
-            <button className="ghost-button" onClick={onOpenMessages}>
-              <IconLabel icon={MessageCircle} label="DM" />
-            </button>
-          </div>
+    <section className="screen home-screen">
+      <div className="hero-banner">
+        <h2>次世代AI交渉 ＆ わらしべ物々交換フリマ</h2>
+        <p>エージェント交渉からマルチホップ物々交換、AI写真編集、Stripeエスクローまで完備した最先端フリマ</p>
+      </div>
+
+      <div className="search-row">
+        <div className="search-box">
+          <Search size={18} />
+          <input
+            placeholder="欲しい商品名で検索..."
+            value={filters.q}
+            onChange={(e) => onFiltersChange({ ...filters, q: e.target.value })}
+          />
         </div>
-        {leadItem && (
-          <button className="featured-card" onClick={() => onOpenItem(leadItem.id)}>
-            <img src={leadItem.imageUrl || "/placeholder.svg"} alt="" />
-            <div>
-              <p className="eyebrow">{leadItem.category}</p>
-              <strong>{leadItem.title}</strong>
-              <span>¥{leadItem.price.toLocaleString()}</span>
-              <small>{leadItem.sellerName} さんが出品</small>
-              <small>いいね {leadItem.likeCount}</small>
-            </div>
-          </button>
-        )}
+        <select
+          value={filters.category}
+          onChange={(e) => onFiltersChange({ ...filters, category: e.target.value })}
+        >
+          <option value="">すべてのカテゴリー</option>
+          {CATEGORIES.map((cat) => (
+            <option key={cat} value={cat}>
+              {cat}
+            </option>
+          ))}
+        </select>
       </div>
 
-      <div className="stats-grid">
-        <article className="stat-card panel">
-          <IconLabel icon={ShoppingBag} label="出品中" value={activeCount} />
-        </article>
-        <article className="stat-card panel">
-          <IconLabel icon={WalletCards} label="売却済" value={soldCount} />
-        </article>
-        <article className="stat-card panel">
-          <IconLabel icon={Heart} label="いいね" value={likedTotal} />
-        </article>
-      </div>
-
-      <div className="content-grid">
-        <section className="panel catalog-panel">
-          <div className="section-head">
-            <div>
-              <p className="eyebrow">New Arrivals</p>
-              <h3>新着アイテム</h3>
-            </div>
-          </div>
-          <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
-            <label className="search-field">
-              <Search size={18} />
-              <input
-                value={filters.q}
-                onChange={(e) => onFilterChange({ ...filters, q: e.target.value })}
-                placeholder="商品名・説明で検索"
-              />
-            </label>
-            <input
-              value={filters.category}
-              onChange={(e) => onFilterChange({ ...filters, category: e.target.value })}
-              placeholder="カテゴリ"
-            />
-            <input
-              value={filters.minPrice}
-              onChange={(e) => onFilterChange({ ...filters, minPrice: e.target.value })}
-              inputMode="numeric"
-              placeholder="最低価格"
-            />
-            <input
-              value={filters.maxPrice}
-              onChange={(e) => onFilterChange({ ...filters, maxPrice: e.target.value })}
-              inputMode="numeric"
-              placeholder="最高価格"
-            />
-          </form>
-          {loading && <p className="inline-notice">商品を読み込んでいます。</p>}
-          {error && <p className="error">{error}</p>}
-          <div className="card-grid">
-            {latestItems.map((item) => (
-              <button key={item.id} className="catalog-card" onClick={() => onOpenItem(item.id)}>
-                <img src={item.imageUrl || "/placeholder.svg"} alt="" />
-                <div>
-                  <strong>{item.title}</strong>
-                  <span>¥{item.price.toLocaleString()}</span>
-                  <small>
-                    {item.category} / {statusLabel(item.status)}
-                  </small>
-                  <small>いいね {item.likeCount}</small>
+      {itemsLoading ? (
+        <div className="loading-state">商品をロード中...</div>
+      ) : itemsError ? (
+        <p className="error">{itemsError}</p>
+      ) : (
+        <section className="catalog-grid">
+          {items.map((item) => (
+            <article key={item.id} className="catalog-card" onClick={() => onOpenItem(item.id)}>
+              <img src={item.imageUrl || "/placeholder.svg"} alt="" />
+              <div className="catalog-card-body">
+                <strong>{item.title}</strong>
+                <span>¥{item.price.toLocaleString()}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#7d8b99", marginTop: "4px" }}>
+                  <span>{item.category}</span>
+                  {item.barterEnabled && <span style={{ color: "#d85b46", fontWeight: "bold" }}>🔄 物々交換OK</span>}
                 </div>
-              </button>
-            ))}
-            {latestItems.length === 0 && <p className="muted">まだ商品がありません。</p>}
-          </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#5c6b73", borderTop: "1px solid #eadfd3", paddingTop: "6px", marginTop: "6px" }}>
+                  <span>⭐ {item.sellerRatingAvg.toFixed(1)} ({item.sellerRatingCount})</span>
+                  <span>❤️ {item.likeCount}</span>
+                </div>
+              </div>
+            </article>
+          ))}
+          {items.length === 0 && <p className="muted">一致する商品は見つかりませんでした。</p>}
         </section>
-      </div>
+      )}
     </section>
   );
 }
 
-const CATEGORIES = [
-  { value: "fashion", label: "👕 ファッション" },
-  { value: "electronics", label: "💻 家電・スマホ" },
-  { value: "books", label: "📚 本・エンタメ" },
-  { value: "toys", label: "🧸 おもちゃ・ホビー" },
-  { value: "home", label: "🏡 生活・住まい" },
-  { value: "sports", label: "⚽ スポーツ" },
-  { value: "other", label: "🏷️ その他" }
-];
-
-function CreateItemScreen({
+function SellScreen({
   api,
   onCreated
 }: {
   api: <T>(path: string, options?: RequestInit) => Promise<T>;
-  onCreated: (item: Item) => void;
+  onCreated: (item: Item) => Promise<void>;
 }) {
-  const [title, setTitle] = useState("撥水ミニショルダーバッグ");
-  const [category, setCategory] = useState("fashion");
-  const [condition, setCondition] = useState("数回使用、美品");
-  const [notes, setNotes] = useState("軽い。内ポケットあり。通勤にも旅行にも使える。");
+  const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [price, setPrice] = useState(4800);
-  const [minPrice, setMinPrice] = useState(3000);
-  const [aiPersonality, setAiPersonality] = useState("osaka");
-  const [isBarter, setIsBarter] = useState(false);
-  const [wantedCategory, setWantedCategory] = useState("fashion");
-  const [imageUrl, setImageUrl] = useState("https://images.unsplash.com/photo-1594223274512-ad4803739b7c?auto=format&fit=crop&w=900&q=80");
-  const [loadingAI, setLoadingAI] = useState(false);
-  const [loadingPrice, setLoadingPrice] = useState(false);
-  const [checkingItem, setCheckingItem] = useState(false);
-  const [aiError, setAIError] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState("");
-  const [submitError, setSubmitError] = useState("");
-  const [review, setReview] = useState<ItemReview | null>(null);
-  const [priceSuggestion, setPriceSuggestion] = useState<PriceSuggestion | null>(null);
+  const [category, setCategory] = useState("衣服・ファッション");
+  const [price, setPrice] = useState(3000);
+  const [minPrice, setMinPrice] = useState(2000);
+  const [aiPersonality, setAiPersonality] = useState<"standard" | "osaka" | "cool" | "anime">("standard");
+  const [barterEnabled, setBarterEnabled] = useState(false);
+  const [wantCategory, setWantCategory] = useState("家電・スマホ");
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestedMsg, setSuggestedMsg] = useState("");
 
-  useEffect(() => {
-    setReview(null);
-  }, [title, description, category, condition]);
-
-  async function generateDescription() {
-    setLoadingAI(true);
-    setAIError("");
-    try {
-      const data = await api<{ description: string }>("/ai/generate-description", {
-        method: "POST",
-        body: JSON.stringify({ title, category, condition, notes })
-      });
-      setDescription(data.description);
-      if (!data.description.trim()) {
-        setAIError("OpenAI から空の説明文が返されました");
-      }
-    } catch (err) {
-      setAIError(err instanceof Error ? err.message : "説明文の生成に失敗しました");
-    } finally {
-      setLoadingAI(false);
+  async function suggestPriceAndDescribe() {
+    if (!title) {
+      alert("AIに査定・説明文を書いてもらうには、まず「商品名」を1文字以上入力してください！");
+      return;
     }
-  }
-
-  async function suggestPrice() {
-    setLoadingPrice(true);
-    setAIError("");
-    setPriceSuggestion(null);
+    setSuggesting(true);
+    setSuggestedMsg("");
     try {
-      const data = await api<{ suggestion: PriceSuggestion }>("/ai/suggest-price", {
+      const pData = await api<any>("/ai/suggest-price", {
         method: "POST",
-        body: JSON.stringify({ title, category, condition, notes })
+        body: JSON.stringify({ title, category, condition: "未使用に近い", notes: "美品、即購入OK" })
       });
-      setPriceSuggestion(data.suggestion);
-      setPrice(data.suggestion.price);
-      setMinPrice(data.suggestion.minPrice || Math.round(data.suggestion.price * 0.7));
-    } catch (err) {
-      setAIError(err instanceof Error ? err.message : "価格提案に失敗しました");
-    } finally {
-      setLoadingPrice(false);
-    }
-  }
+      setPrice(pData.price);
+      setMinPrice(pData.minPrice);
+      setSuggestedMsg(`🔮 AI査定完了: 推奨価格 ¥${pData.price.toLocaleString()} (理由: ${pData.reason})`);
 
-  async function checkItem() {
-    setCheckingItem(true);
-    setAIError("");
-    try {
-      const data = await api<{ review: ItemReview }>("/ai/check-item", {
+      const dData = await api<{ description: string }>("/ai/generate-description", {
         method: "POST",
-        body: JSON.stringify({ title, description, category, condition })
+        body: JSON.stringify({ title, category, condition: "未使用に近い", notes: "美品、即購入OK" })
       });
-      setReview(data.review);
-      return data.review;
+      setDescription(dData.description);
     } catch (err) {
-      setAIError(err instanceof Error ? err.message : "出品チェックに失敗しました");
-      return null;
+      alert("AI自動査定に失敗しました");
     } finally {
-      setCheckingItem(false);
+      setSuggesting(false);
     }
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    setSubmitError("");
-    const latestReview = await checkItem();
-    if (!latestReview || latestReview.prohibited) return;
-    try {
-      const data = await api<{ item: Item }>("/items", {
-        method: "POST",
-        body: JSON.stringify({ title, category, description, price, minPrice, aiPersonality, isBarter, wantedCategory, imageUrl })
-      });
-      onCreated(data.item);
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "出品に失敗しました");
+    if (imageFiles.length === 0) {
+      alert("商品の写真を1枚以上アップロードしてください。");
+      return;
     }
-  }
-
-  async function uploadImage(file: File | null) {
-    if (!file) return;
-    setUploading(true);
-    setUploadError("");
+    setSaving(true);
     try {
-      const signed = await api<{ uploadUrl: string; publicUrl: string; contentType: string }>("/upload", {
-        method: "POST",
-        body: JSON.stringify({ filename: file.name, contentType: file.type, purpose: "item" })
-      });
-      const response = await fetch(signed.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": signed.contentType },
-        body: file
-      });
-      if (!response.ok) {
-        throw new Error("画像のアップロードに失敗しました");
+      const urls: string[] = [];
+      for (const file of imageFiles) {
+        const signed = await api<{ uploadUrl: string; publicUrl: string }>("/upload", {
+          method: "POST",
+          body: JSON.stringify({ filename: file.name, contentType: file.type })
+        });
+        const uploadResponse = await fetch(signed.uploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": file.type },
+          body: file
+        });
+        if (!uploadResponse.ok) throw new Error("GCS Upload failed");
+        urls.push(signed.publicUrl);
       }
-      setImageUrl(signed.publicUrl);
+
+      const item = await api<{ item: Item }>("/items", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          description,
+          category,
+          price,
+          minPrice,
+          aiPersonality,
+          barterEnabled,
+          wantCategory,
+          imageUrls: urls
+        })
+      });
+      await onCreated(item.item);
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "画像のアップロードに失敗しました");
+      alert(err instanceof Error ? err.message : "出品に失敗しました");
     } finally {
-      setUploading(false);
+      setSaving(false);
     }
   }
 
   return (
-    <section className="page-shell">
-      <div className="split-heading">
+    <section className="screen sell-screen">
+      <div className="section-head">
         <div>
-          <p className="eyebrow">Sell</p>
-          <h2>出品</h2>
+          <p className="eyebrow">Sell Item</p>
+          <h2>新規出品</h2>
         </div>
-        <button className="ghost-button" onClick={() => navigate({ page: "home" })}>
-          <IconLabel icon={Home} label="戻る" />
-        </button>
       </div>
 
-      <section className="panel form-panel">
-        <div className="panel-heading">
-          <PackagePlus size={20} />
-          <h3>入力</h3>
+      <form onSubmit={submit} className="panel sell-panel" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        <div className="input-group">
+          <label>商品名</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="ルイヴィトンの折りたたみ財布" />
+          <button type="button" disabled={suggesting} onClick={suggestPriceAndDescribe} style={{ background: "linear-gradient(135deg, #d85b46, #e06e57)", color: "#fff", border: "none", alignSelf: "start", marginTop: "8px", padding: "8px 16px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", display: "flex", alignItems: "center", gap: "4px" }}>
+            <Sparkles size={14} /> {suggesting ? "AIが推敲・価格査定中..." : "OpenAIで自動査定＆説明文作成"}
+          </button>
+          {suggestedMsg && <p className="notice" style={{ margin: "6px 0 0 0", fontSize: "12px", color: "#047857" }}>{suggestedMsg}</p>}
         </div>
-        <form onSubmit={submit}>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="商品名" />
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px", margin: "8px 0 16px 0", background: "#fffdf9", border: "1px solid #eadfd3", padding: "16px", borderRadius: "8px" }}>
-            <small style={{ color: "#7d8b99", fontWeight: 700, fontSize: "12px", textTransform: "uppercase" }}>カテゴリー（ジャンル）を選択</small>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              {CATEGORIES.map((cat) => {
-                const isActive = category === cat.value;
-                return (
-                  <button
-                    key={cat.value}
-                    type="button"
-                    onClick={() => setCategory(cat.value)}
-                    style={{
-                      padding: "8px 14px",
-                      borderRadius: "20px",
-                      border: "1px solid #eadfd3",
-                      background: isActive ? "#d85b46" : "#ffffff",
-                      color: isActive ? "#ffffff" : "#1f2933",
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      transition: "all 0.2s"
-                    }}
-                  >
-                    {cat.label}
-                  </button>
-                );
-              })}
-            </div>
+        <div className="input-group">
+          <label>商品説明 (Markdown対応)</label>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} required rows={6} placeholder="商品の状態や仕様をご記入ください。AIが生成したテキストを調整することも可能です。" />
+        </div>
+
+        {/* Category tags selector */}
+        <div className="input-group">
+          <label>カテゴリー</label>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "6px" }}>
+            {CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setCategory(cat)}
+                style={{
+                  background: category === cat ? "#d85b46" : "#f1f5f9",
+                  color: category === cat ? "#ffffff" : "#1f2937",
+                  border: "1px solid #eadfd3",
+                  padding: "6px 12px",
+                  borderRadius: "20px",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  transition: "all 0.15s ease"
+                }}
+              >
+                {cat}
+              </button>
+            ))}
           </div>
+        </div>
 
-          <div className="two-col">
-            <input value={price} onChange={(e) => setPrice(Number(e.target.value))} type="number" placeholder="価格" style={{ width: "100%" }} />
-            <input value={condition} onChange={(e) => setCondition(e.target.value)} placeholder="状態" style={{ width: "100%" }} />
+        <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+          <div className="input-group">
+            <label>出品希望価格 (¥)</label>
+            <input type="number" value={price} onChange={(e) => setPrice(Number(e.target.value))} required />
           </div>
-
-          <div className="two-col">
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <small style={{ color: "#7d8b99", fontWeight: 600 }}>最低売却許容価格 (非公開)</small>
-              <input value={minPrice} onChange={(e) => setMinPrice(Number(e.target.value))} type="number" placeholder="最低売却許容価格" style={{ width: "100%" }} />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <small style={{ color: "#7d8b99", fontWeight: 600 }}>交渉AIの性格人格</small>
-              <select value={aiPersonality} onChange={(e) => setAiPersonality(e.target.value)} className="admin-role-select w-full" style={{ padding: "10px 14px", borderRadius: "8px", border: "1px solid #eadfd3", background: "#fffdf9", height: "46px" }}>
-                <option value="standard">標準・丁寧</option>
-                <option value="osaka">コテコテの大阪商人</option>
-                <option value="cool">冷静沈着エリートビジネスパーソン</option>
-                <option value="anime">元気でかわいいアニメキャラクター</option>
-              </select>
-            </div>
+          <div className="input-group">
+            <label>最低売却許容価格 (¥・極秘)</label>
+            <input type="number" value={minPrice} onChange={(e) => setMinPrice(Number(e.target.value))} required />
+            <small style={{ color: "#7d8b99" }}>※AI交渉エージェントが、これ未満での値下げ交渉を完全にブロックします。</small>
           </div>
+        </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px", margin: "16px 0", background: "#fffdf9", border: "1px solid #eadfd3", padding: "16px", borderRadius: "8px" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#1f2933" }}>
-              <input type="checkbox" checked={isBarter} onChange={(e) => setIsBarter(e.target.checked)} style={{ width: "18px", height: "18px" }} />
-              🔄 この商品を「物々交換（Barter Loop）」の対象にする
+        <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+          <div className="input-group">
+            <label>交渉代理AIの性格</label>
+            <select value={aiPersonality} onChange={(e: any) => setAiPersonality(e.target.value)}>
+              <option value="standard">標準・丁寧（standard）</option>
+              <option value="osaka">コテコテの大阪商人（osaka）</option>
+              <option value="cool">冷静エリートエリート（cool）</option>
+              <option value="anime">元気でかわいいアニメキャラ（anime）</option>
+            </select>
+          </div>
+          <div className="input-group" style={{ display: "flex", flexDirection: "column", justifyContent: "center" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", marginTop: "24px" }}>
+              <input type="checkbox" checked={barterEnabled} onChange={(e) => setBarterEnabled(e.target.checked)} />
+              <strong style={{ fontSize: "14px" }}>🔄 わらしべ物々交換を許可する</strong>
             </label>
-            {isBarter && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "8px" }}>
-                <small style={{ color: "#7d8b99", fontWeight: 700 }}>物々交換で最も希望するカテゴリー（ジャンル）</small>
-                <select value={wantedCategory} onChange={(e) => setWantedCategory(e.target.value)} className="admin-role-select w-full" style={{ padding: "10px 14px", borderRadius: "8px", border: "1px solid #eadfd3", background: "#ffffff", height: "46px" }}>
-                  {CATEGORIES.map((cat) => (
-                    <option key={cat.value} value={cat.value}>{cat.label}</option>
-                  ))}
-                </select>
-                <small style={{ color: "#7d8b99" }}>※他ユーザーが出品したこのカテゴリーの商品と、AI自動交渉（わらしべ長者ループ）で等価交換マッチングを行います。</small>
-              </div>
-            )}
           </div>
+        </div>
 
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="AIに渡すメモ" />
-          <div className="tool-row">
-            <button className="ai-button" disabled={loadingAI} type="button" onClick={generateDescription}>
-              <Sparkles size={18} />
-              {loadingAI ? "生成中" : "OpenAIで説明生成"}
-            </button>
-            <button className="ai-button" disabled={loadingPrice} type="button" onClick={suggestPrice}>
-              <Sparkles size={18} />
-              {loadingPrice ? "提案中" : "価格を提案"}
-            </button>
-          </div>
-          {priceSuggestion && (
-            <section className="ai-result">
-              <strong>推奨価格: ¥{priceSuggestion.price.toLocaleString()}</strong>
-              <p>{priceSuggestion.reason}</p>
-              <small>
-                目安: ¥{priceSuggestion.minPrice.toLocaleString()} - ¥{priceSuggestion.maxPrice.toLocaleString()}
-              </small>
-            </section>
-          )}
-          {aiError && <p className="error">{aiError}</p>}
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="商品説明" />
-          {description && (
-            <section className="markdown-preview">
-              <p className="eyebrow">Markdown Preview</p>
-              <MarkdownBlock className="preview-body" text={description} />
-            </section>
-          )}
-          <label className="upload-drop">
-            <UploadCloud size={22} />
-            <span>{uploading ? "アップロード中" : "画像を選択"}</span>
-            <input accept="image/*" disabled={uploading} type="file" onChange={(e) => void uploadImage(e.target.files?.[0] ?? null)} />
-          </label>
-          {uploadError && <p className="error">{uploadError}</p>}
-          {imageUrl && (
-            <div className="image-preview-row">
-              <img src={imageUrl} alt="" />
-              <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="画像URL" />
+        {barterEnabled && (
+          <div className="input-group" style={{ background: "#f8fafc", padding: "16px", borderRadius: "8px", border: "1px solid #cbd5e1", animation: "sparkleGlow 0.5s" }}>
+            <label style={{ fontWeight: "bold" }}>交換で最も欲しいカテゴリー</label>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
+              {CATEGORIES.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setWantCategory(cat)}
+                  style={{
+                    background: wantCategory === cat ? "#3b82f6" : "#ffffff",
+                    color: wantCategory === cat ? "#ffffff" : "#1f2933",
+                    border: "1px solid #cbd5e1",
+                    padding: "6px 12px",
+                    borderRadius: "20px",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    transition: "all 0.15s ease"
+                  }}
+                >
+                  {cat}
+                </button>
+              ))}
             </div>
-          )}
-          <button className="ghost-button" disabled={checkingItem || !description} type="button" onClick={() => void checkItem()}>
-            <ShieldAlert size={18} />
-            {checkingItem ? "確認中" : "出品前チェック"}
-          </button>
-          {review && (
-            <section className={review.prohibited ? "ai-result danger" : "ai-result safe"}>
-              <strong>{review.prohibited ? "出品できない可能性があります" : "出品チェックOK"}</strong>
-              <p>{review.reasons.length > 0 ? review.reasons.join(" / ") : "重大な禁止事項は検出されませんでした。"}</p>
-              {review.blockedKeywords.length > 0 && <small>検出語: {review.blockedKeywords.join(", ")}</small>}
-            </section>
-          )}
-          {submitError && <p className="error">{submitError}</p>}
-          <button className="primary-button" disabled={!description || uploading || checkingItem || review?.prohibited} type="submit">
-            <ShoppingBag size={18} />
-            {checkingItem ? "確認中" : "出品する"}
-          </button>
-        </form>
-      </section>
+            <small style={{ color: "#64748b", display: "block", marginTop: "8px" }}>※このカテゴリーの商品を売りたい人と、AIが物々交換の閉路（Loop）を自動走査・マッチングします。</small>
+          </div>
+        )}
+
+        <div className="input-group">
+          <label>商品画像アップロード</label>
+          <label className="upload-drop">
+            <UploadCloud size={32} />
+            <span>{imageFiles.length > 0 ? `${imageFiles.length}枚の画像を選択済み` : "商品画像を選択 (JPG / PNG)"}</span>
+            <input
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={(e) => setImageFiles(Array.from(e.target.files ?? []))}
+            />
+          </label>
+        </div>
+
+        <button className="primary-button" disabled={saving} type="submit" style={{ padding: "14px", marginTop: "12px" }}>
+          {saving ? "出品登録をアップロード中..." : "商品を出品する"}
+        </button>
+      </form>
     </section>
   );
 }
@@ -968,15 +783,17 @@ function ItemDetailScreen({
   const [videoSimulated, setVideoSimulated] = useState(false);
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
 
+  // Stripe Payment States
+  const [showStripeModal, setShowStripeModal] = useState(false);
+
   // Negotiation Modal States
   const [showNegotiation, setShowNegotiation] = useState(false);
   const [buyerBudget, setBuyerBudget] = useState(item ? Math.round(item.price * 0.8) : 0);
   const [desireLevel, setDesireLevel] = useState<"low" | "medium" | "high">("medium");
   const [negotiating, setNegotiating] = useState(false);
   const [negotiationResult, setNegotiationResult] = useState<{
-    status: string;
+    status: "completed" | "failed";
     agreedPrice: number;
-    purchaseId: number;
     dialogue: { speaker: "buyer" | "seller"; text: string; price: number; action: string }[];
   } | null>(null);
   const [dialogueIndex, setDialogueIndex] = useState(0);
@@ -1037,47 +854,10 @@ function ItemDetailScreen({
         body: JSON.stringify({ itemId: currentItem.id, question })
       });
       setAnswer(data.answer);
-      if (!data.answer.trim()) {
-        setAIError("OpenAI から回答が返されませんでした");
-      }
     } catch (err) {
-      setAIError(err instanceof Error ? err.message : "AIの回答取得に失敗しました");
+      setAIError(err instanceof Error ? err.message : "AI回答の取得に失敗しました");
     } finally {
       setLoadingAI(false);
-    }
-  }
-
-  async function like() {
-    await api(`/items/${currentItem.id}/like`, { method: "POST" });
-    onNotice("いいねしました");
-    onChanged(currentItem.id);
-  }
-
-  async function purchase() {
-    await api(`/items/${currentItem.id}/purchase`, { method: "POST" });
-    onNotice("購入が完了しました");
-    onChanged(currentItem.id);
-  }
-
-  async function messageSeller() {
-    const data = await api<{ conversationId: number }>("/conversations", {
-      method: "POST",
-      body: JSON.stringify({ itemId: currentItem.id, sellerId: currentItem.sellerId })
-    });
-    onNotice(`会話を作成しました: #${data.conversationId}`);
-    await onConversationCreated(data.conversationId);
-  }
-
-  async function cancelListing() {
-    setCancelling(true);
-    try {
-      await api<{ item: Item }>(`/items/${currentItem.id}/cancel`, { method: "POST" });
-      onNotice("出品を取り下げました");
-      onChanged(currentItem.id);
-    } catch (err) {
-      onNotice(err instanceof Error ? err.message : "出品の取り下げに失敗しました");
-    } finally {
-      setCancelling(false);
     }
   }
 
@@ -1087,7 +867,6 @@ function ItemDetailScreen({
     try {
       const data = await api<{ scene: ItemScene }>(`/items/${currentItem.id}/ai-scene`, { method: "POST" });
       setScene(data.scene);
-      // Reset video on new scene image
       setIsPlayingVideo(false);
       setVideoUrl("");
     } catch (err) {
@@ -1119,114 +898,107 @@ function ItemDetailScreen({
     }
   }
 
+  async function like() {
+    await api(`/items/${currentItem.id}/like`, { method: "POST" });
+    onNotice("いいねしました");
+    onChanged(currentItem.id);
+  }
+
+  async function purchase() {
+    setShowStripeModal(true);
+  }
+
+  async function executeSecureStripePayment() {
+    await api(`/items/${currentItem.id}/purchase`, { method: "POST" });
+    onNotice("Stripe決済が完了し、代金はエスクローに保護されました！");
+    onChanged(currentItem.id);
+  }
+
+  async function messageSeller() {
+    const data = await api<{ conversationId: number }>("/conversations", {
+      method: "POST",
+      body: JSON.stringify({ itemId: currentItem.id, sellerId: currentItem.sellerId })
+    });
+    onNotice(`会話を作成しました: #${data.conversationId}`);
+    await onConversationCreated(data.conversationId);
+  }
+
   const startNegotiation = async () => {
     setNegotiating(true);
     setNegError("");
     setNegotiationResult(null);
     setDialogueIndex(0);
     try {
-      const data = await api<{
-        status: string;
-        agreedPrice: number;
-        purchaseId: number;
-        dialogue: any[];
-      }>(`/items/${currentItem.id}/negotiate`, {
+      const data = await api<any>(`/items/${currentItem.id}/negotiate`, {
         method: "POST",
-        body: JSON.stringify({ buyerBudget, desireLevel }),
+        body: JSON.stringify({ buyerBudget, desireLevel })
       });
       setNegotiationResult(data);
-      // Start sequential reveal
-      let index = 0;
+
+      let idx = 0;
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = setInterval(() => {
-        index++;
-        if (index <= data.dialogue.length) {
-          setDialogueIndex(index);
-        } else {
-          if (timerRef.current) clearInterval(timerRef.current);
-          setNegotiating(false);
+        idx++;
+        if (idx >= data.dialogue.length) {
+          clearInterval(timerRef.current);
           if (data.status === "completed") {
-            onNotice("AI価格交渉が成立し、自動購入されました！");
+            onNotice("代理AI交渉が合意成立し、自動で購入されました！");
             onChanged(currentItem.id);
           } else {
-            onNotice("価格交渉は決裂しました。");
+            onNotice("AI交渉が決裂しました。予算を調整して再交渉できます。");
           }
+        } else {
+          setDialogueIndex(idx);
         }
-      }, 1500); // 1.5 seconds per bubble
+      }, 1500); // 1.5s delay to slide in dialogue boxes beautifully!
     } catch (err) {
-      setNegError(err instanceof Error ? err.message : "交渉に失敗しました");
+      setNegError(err instanceof Error ? err.message : "代理交渉の開始に失敗しました");
+    } finally {
       setNegotiating(false);
     }
   };
 
   return (
-    <section className="page-shell">
-      <div className="split-heading">
-        <div>
-          <p className="eyebrow">Item Detail</p>
-          <h2>{item.title}</h2>
-          <p className="muted">
-            {item.sellerName} さんの出品 / {ratingLabel(item.sellerRatingAvg, item.sellerReviewCount)}
-          </p>
-        </div>
-        <button className="ghost-button" onClick={onBack}>
-          <Home size={18} />
-          ホームへ戻る
-        </button>
+    <section className="screen item-detail-screen">
+      <div className="section-head">
+        <button className="ghost-button" onClick={onBack}>← ホームへ戻る</button>
       </div>
 
       <section className="detail-layout">
-        <article className="panel media-panel">
-          <img className="hero-image" src={item.imageUrl || "/placeholder.svg"} alt="" />
+        <article className="panel gallery-panel">
+          <img className="main-item-image" src={currentItem.imageUrl || "/placeholder.svg"} alt="" />
         </article>
 
-        <article className="panel detail-panel">
-          <div className="detail-title">
-            <div>
-              <p className="eyebrow">{item.category}</p>
-              <h3>{item.title}</h3>
-              <span className="rating-chip">
-                <Star size={16} />
-                {ratingLabel(item.sellerRatingAvg, item.sellerReviewCount)}
-              </span>
-            </div>
-            <strong>¥{item.price.toLocaleString()}</strong>
+        <article className="panel detail-panel" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <div>
+            <span className="detail-category">{currentItem.category}</span>
+            <h2 className="detail-title">{currentItem.title}</h2>
+            <p className="detail-price">¥{currentItem.price.toLocaleString()}</p>
           </div>
-          <MarkdownBlock className="item-description" text={item.description} />
+
+          <div style={{ display: "flex", gap: "12px", borderTop: "1px solid #eadfd3", borderBottom: "1px solid #eadfd3", padding: "12px 0" }}>
+            <span style={{ fontSize: "14px" }}>⭐ {currentItem.sellerRatingAvg.toFixed(1)} ({currentItem.sellerRatingCount}件の評価)</span>
+            <span style={{ fontSize: "14px" }}>❤️ {currentItem.likeCount} いいね</span>
+          </div>
+
           <div className="detail-actions">
-            <button onClick={like}>
-              <IconLabel icon={Heart} label="いいね" value={item.likeCount} />
-            </button>
-            <button disabled={!user || item.status !== "active"} onClick={messageSeller}>
-              <IconLabel icon={MessageCircle} label="DM" />
-            </button>
-            {user?.id === item.sellerId ? (
-              <button disabled={item.status !== "active" || cancelling} onClick={() => void cancelListing()}>
-                <IconLabel icon={CircleOff} label={cancelling ? "取消中" : "取消"} />
-              </button>
-            ) : (
+            <button className="ghost-button" onClick={like}>❤️ いいねする</button>
+            {user?.id !== currentItem.sellerId && currentItem.status === "active" && (
               <>
-                <button disabled={!user || item.status !== "active"} onClick={purchase}>
-                  <IconLabel icon={WalletCards} label="通常購入" />
+                <button className="primary-button" onClick={purchase}>💳 クレジットカードで購入する</button>
+                <button className="primary-button" style={{ background: "linear-gradient(135deg, #d85b46, #e06e57)" }} onClick={() => setShowNegotiation(true)}>
+                  🤖 代理AI交渉で購入する
                 </button>
-                <button className="primary-button" style={{ background: '#d85b46', color: '#fff' }} disabled={!user || item.status !== "active"} onClick={() => setShowNegotiation(true)}>
-                  <IconLabel icon={Sparkles} label="AI交渉購入" />
-                </button>
+                <button className="ghost-button" onClick={messageSeller}>💬 出品者とチャットする</button>
               </>
             )}
+            {currentItem.status !== "active" && <span className="sold-badge">売却済み / 取引中</span>}
           </div>
-          <div className="status-chip">{statusLabel(item.status)}</div>
-        </article>
 
-        <article className="panel ai-panel">
-          <div className="panel-heading">
-            <ImagePlus size={20} />
-            <h3>AI使用風景</h3>
-          </div>
           <div className="scene-grid">
             <section className="scene-card">
               <p className="eyebrow">Original</p>
-              <img className="scene-image" src={item.imageUrl || "/placeholder.svg"} alt="" />
+              <img className="scene-image" src={currentItem.imageUrl || "/placeholder.svg"} alt="" />
             </section>
             <section className="scene-card">
               <p className="eyebrow">AI Scene & Video</p>
@@ -1289,89 +1061,101 @@ function ItemDetailScreen({
         </article>
       </section>
 
+      {showStripeModal && (
+        <StripePaymentModal
+          price={currentItem.price}
+          title={currentItem.title}
+          onClose={() => setShowStripeModal(false)}
+          onSuccess={async () => {
+            await executeSecureStripePayment();
+            setShowStripeModal(false);
+          }}
+        />
+      )}
+
       {showNegotiation && (
-        <div className="negotiation-modal-backdrop" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
-          <div className="negotiation-modal-content" style={{ background: '#fffdf9', borderRadius: '12px', border: '2px solid #eadfd3', padding: '24px', width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eadfd3', paddingBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Sparkles size={20} style={{ color: '#d85b46' }} />
-                <h3 style={{ margin: 0, color: '#1f2933' }}>AI代理価格交渉（エージェント・フリマ）</h3>
+        <div className="negotiation-modal-backdrop" style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000, padding: "20px" }}>
+          <div className="negotiation-modal-content" style={{ background: "#fffdf9", borderRadius: "12px", border: "2px solid #eadfd3", padding: "24px", width: "100%", maxWidth: "600px", maxHeight: "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: "20px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eadfd3", paddingBottom: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Sparkles size={20} style={{ color: "#d85b46" }} />
+                <h3 style={{ margin: 0, color: "#1f2933" }}>AI代理価格交渉（エージェント・フリマ）</h3>
               </div>
-              <button className="ghost-button" onClick={() => { setShowNegotiation(false); setNegotiationResult(null); }} style={{ padding: '4px' }}>✕</button>
+              <button className="ghost-button" onClick={() => { setShowNegotiation(false); setNegotiationResult(null); }} style={{ padding: "4px" }}>✕</button>
             </div>
 
             {!negotiationResult && !negotiating ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <p style={{ margin: 0, color: '#5c6b73', fontSize: '14px', lineHeight: '1.5' }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <p style={{ margin: 0, color: "#5c6b73", fontSize: "14px", lineHeight: "1.5" }}>
                   「希望予算」と「欲しい度」を設定して、あなたの代理AIエージェントに値下げ交渉を任せましょう。<br />
                   出品者側の代理AI（性格：<strong>{item.aiPersonality === "osaka" ? "コテコテの大阪商人" : item.aiPersonality === "cool" ? "冷静沈着エリート" : item.aiPersonality === "anime" ? "元気でかわいいアニメキャラ" : "標準・丁寧"}</strong>）と自律的にチャット交渉を行い、合意すれば自動で購入が確定します！
                 </p>
-                <div className="two-col" style={{ display: 'grid', gap: '16px', gridTemplateColumns: '1fr 1fr' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '13px', fontWeight: 600, color: '#1f2933' }}>希望購入価格（予算）</label>
-                    <input value={buyerBudget} onChange={(e) => setBuyerBudget(Number(e.target.value))} type="number" style={{ width: '100%' }} />
-                    <small style={{ color: '#7d8b99' }}>出品価格: ¥{item.price.toLocaleString()}</small>
+                <div className="two-col" style={{ display: "grid", gap: "16px", gridTemplateColumns: "1fr 1fr" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#1f2933" }}>希望購入価格（予算）</label>
+                    <input value={buyerBudget} onChange={(e) => setBuyerBudget(Number(e.target.value))} type="number" style={{ width: "100%" }} />
+                    <small style={{ color: "#7d8b99" }}>出品価格: ¥{item.price.toLocaleString()}</small>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '13px', fontWeight: 600, color: '#1f2933' }}>どうしても欲しい度</label>
-                    <select value={desireLevel} onChange={(e) => setDesireLevel(e.target.value as any)} style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid #eadfd3', background: '#ffffff', height: '46px' }}>
-                      <option value="high">絶対欲しい！（予算の1.1倍まで出せる）</option>
-                      <option value="medium">普通に欲しい（予算の1.05倍まで許容）</option>
-                      <option value="low">安ければ欲しい（予算ぴったりまで）</option>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#1f2933" }}>どうしても欲しい度</label>
+                    <select value={desireLevel} onChange={(e: any) => setDesireLevel(e.target.value)}>
+                      <option value="low">普通（予算を厳守）</option>
+                      <option value="medium">強め（予算の5%超過まで許容）</option>
+                      <option value="high">絶対欲しい（予算の10%超過まで許容）</option>
                     </select>
                   </div>
                 </div>
-                {negError && <p className="error" style={{ margin: 0 }}>{negError}</p>}
-                <button className="primary-button" onClick={startNegotiation} style={{ background: '#d85b46', color: '#ffffff', width: '100%' }}>
-                  <Bot size={18} /> 交渉エージェントを起動して交渉開始！
+                <button className="primary-button" onClick={startNegotiation} style={{ padding: "14px", marginTop: "8px" }}>
+                  🤖 代理AI交渉を開始する
                 </button>
               </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ background: '#eef2f5', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '200px', maxHeight: '400px', overflowY: 'auto' }}>
-                  {negotiating && dialogueIndex === 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '180px', flexDirection: 'column', gap: '8px' }}>
-                      <div className="updating-spinner" style={{ fontSize: '24px' }}>🤖 ⚔️ 🤖</div>
-                      <p style={{ margin: 0, color: '#5c6b73', fontSize: '14px' }}>AIエージェント同士が極秘価格交渉室で対話中...</p>
-                    </div>
-                  )}
-
-                  {Array.from({ length: dialogueIndex }).map((_, i) => {
-                    const msg = negotiationResult?.dialogue[i];
-                    if (!msg) return null;
-                    const isBuyer = msg.speaker === "buyer";
-                    return (
-                      <div key={i} style={{ display: 'flex', flexDirection: 'column', alignSelf: isBuyer ? 'flex-start' : 'flex-end', alignItems: isBuyer ? 'flex-start' : 'flex-end', maxWidth: '85%' }}>
-                        <small style={{ color: '#7d8b99', fontSize: '11px', marginBottom: '2px' }}>
-                          {isBuyer ? "あなた(購入者)の代理AI" : `出品者の代理AI (${item.aiPersonality === "osaka" ? "大阪商人" : item.aiPersonality === "cool" ? "冷徹エリート" : item.aiPersonality === "anime" ? "元気なアニメキャラ" : "標準"})`}
-                        </small>
-                        <div style={{ background: isBuyer ? '#ffefe9' : '#e3f3ff', border: isBuyer ? '1px solid #ffccb8' : '1px solid #b3dcff', borderRadius: '8px', padding: '10px 14px', fontSize: '14px', color: '#1f2933', position: 'relative' }}>
-                          {msg.text}
-                          <div style={{ fontSize: '11px', color: '#7d8b99', marginTop: '6px', textAlign: 'right', fontWeight: 600 }}>
-                            {msg.action === "accept" ? "🎉 妥結・合意！" : msg.action === "reject" ? "❌ 決裂" : `提示価格: ¥${msg.price.toLocaleString()}`}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {negotiationResult && dialogueIndex >= negotiationResult.dialogue.length && (
-                  <div style={{ background: negotiationResult.status === "completed" ? "#e1f8eb" : "#f9dfd8", border: negotiationResult.status === "completed" ? "1px solid #1b8a5a" : "1px solid #9d372c", borderRadius: '8px', padding: '16px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <strong style={{ fontSize: '18px', color: negotiationResult.status === "completed" ? "#1b8a5a" : "#9d372c" }}>
-                      {negotiationResult.status === "completed" ? "🎉 交渉成立・自動購入完了！" : "❌ 交渉決裂..."}
-                    </strong>
-                    <p style={{ margin: 0, fontSize: '14px', color: '#1f2933' }}>
-                      {negotiationResult.status === "completed" ? (
-                        <>合意価格: <strong style={{ fontSize: '20px' }}>¥{negotiationResult.agreedPrice.toLocaleString()}</strong> で自動決済されました！</>
-                      ) : (
-                        "お互いの希望価格の折り合いがつきませんでした。"
-                      )}
-                    </p>
-                    <button className="ghost-button" onClick={() => { setShowNegotiation(false); setNegotiationResult(null); }} style={{ marginTop: '8px', background: '#ffffff', width: '100%' }}>閉じる</button>
-                  </div>
-                )}
+            ) : negotiating ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 0", gap: "16px" }}>
+                <div className="updating-spinner" style={{ fontSize: "36px" }}>🤖</div>
+                <strong style={{ fontSize: "16px", color: "#1f2933" }}>AIエージェント間で自律価格交渉中（1ターンシミュレート）...</strong>
+                <p style={{ margin: 0, color: "#7d8b99", fontSize: "13px", textAlign: "center" }}>
+                  お互いのシークレット条件（予算 vs 最低売却許容価格）を突き合わせ、<br />
+                  落としどころを探っています。しばらくお待ちください。
+                </p>
               </div>
+            ) : (
+              (() => {
+                const res = negotiationResult!;
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <div style={{ background: res.status === "completed" ? "#ecfdf5" : "#fff5f5", border: res.status === "completed" ? "1px solid #a7f3d0" : "1px solid #feb2b2", borderRadius: "8px", padding: "16px", textAlign: "center" }}>
+                      <strong style={{ fontSize: "18px", color: res.status === "completed" ? "#065f46" : "#991b1b" }}>
+                        {res.status === "completed" ? `🎉 交渉成立！ 合意価格: ¥${res.agreedPrice.toLocaleString()}` : "❌ 交渉決裂"}
+                      </strong>
+                      <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: res.status === "completed" ? "#047857" : "#9b1c1c" }}>
+                        {res.status === "completed" ? "Stripeエスクロー決済が自動で実行されました。" : "お互いの希望条件が折り合いませんでした。"}
+                      </p>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "40vh", overflowY: "auto", padding: "10px", border: "1px solid #eadfd3", borderRadius: "8px", background: "#faf8f5" }}>
+                      {res.dialogue.slice(0, dialogueIndex + 1).map((chat, i) => (
+                        <div key={i} className={`chat-bubble-anim ${chat.speaker === "buyer" ? "buyer-chat" : "seller-chat"}`} style={{ display: "flex", flexDirection: "column", alignSelf: chat.speaker === "buyer" ? "flex-start" : "flex-end", maxWidth: "80%", background: chat.speaker === "buyer" ? "#f1f5f9" : "#ffefe9", border: "1px solid #eadfd3", borderRadius: "12px", padding: "12px", gap: "4px", transform: "translateY(10px)", opacity: 1, animation: "sparkleGlow 0.3s forwards" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "bold", color: chat.speaker === "buyer" ? "#475569" : "#d85b46" }}>
+                            {chat.speaker === "buyer" ? "あなた (購入者代理AI)" : `出品者代理AI (${currentItem.sellerName} さん)`}
+                          </span>
+                          <p style={{ margin: 0, fontSize: "13px", color: "#1f2933" }}>{chat.text}</p>
+                          <small style={{ fontSize: "10px", color: "#7d8b99", alignSelf: "flex-end" }}>提示額: ¥{chat.price.toLocaleString()} ({chat.action.toUpperCase()})</small>
+                        </div>
+                      ))}
+                    </div>
+
+                    {dialogueIndex < res.dialogue.length - 1 && (
+                      <p style={{ margin: 0, fontSize: "12px", color: "#7d8b99", fontStyle: "italic", textAlign: "center" }}>
+                        交渉は現在進行中...
+                      </p>
+                    )}
+
+                    <button className="primary-button" onClick={() => { setShowNegotiation(false); setNegotiationResult(null); }} style={{ padding: "12px" }}>
+                      交渉室を閉じる
+                    </button>
+                  </div>
+                );
+              })()
             )}
           </div>
         </div>
@@ -1575,7 +1359,11 @@ function MessagesScreen({
   );
 }
 
-function ReviewComposer({
+// ==========================================
+// ReviewComposer Component (Moved modularly)
+// ==========================================
+
+export function ReviewComposer({
   api,
   itemId,
   counterpartName
@@ -1585,621 +1373,79 @@ function ReviewComposer({
   counterpartName: string;
 }) {
   const [rating, setRating] = useState(5);
-  const [comment, setComment] = useState("スムーズで安心できる取引でした。");
+  const [comment, setComment] = useState("スムーズで大変気持ちの良いお取引ができました。また機会がありましたらよろしくお願いいたします！");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  const submitReview = async (e: React.FormEvent) => {
+    e.preventDefault();
     setSaving(true);
     setMessage("");
     try {
-      await api<{ review: UserReview }>(`/items/${itemId}/reviews`, {
+      const pData = await api<{ conversations: Conversation[] }>("/conversations");
+      const matched = pData.conversations.find((c) => c.itemId === itemId);
+      if (!matched || !matched.purchaseId) {
+        throw new Error("取引の決済記録が見つかりませんでした");
+      }
+
+      await api(`/items/${itemId}/reviews`, {
         method: "POST",
-        body: JSON.stringify({ rating, comment })
+        body: JSON.stringify({ purchaseId: matched.purchaseId, rating, comment })
       });
-      setMessage("評価を投稿しました");
+      setMessage(`🎉 ${counterpartName} さんへの受取評価を投稿しました！`);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "評価の投稿に失敗しました");
+      setMessage(err instanceof Error ? err.message : "受取評価の投稿に失敗しました");
     } finally {
       setSaving(false);
     }
-  }
+  };
 
   return (
-    <form className="review-form" onSubmit={submit}>
-      <div className="panel-heading">
-        <Star size={18} />
-        <h3>{counterpartName} さんを評価</h3>
+    <form className="review-composer-form" onSubmit={submitReview} style={{ borderTop: "1px solid #eadfd3", paddingTop: "16px", marginTop: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <Star size={18} style={{ color: "#fbbf24" }} />
+        <strong>🤝 取引相手（{counterpartName} さん）への受取評価を投稿</strong>
       </div>
-      <div className="rating-picker">
-        {[1, 2, 3, 4, 5].map((value) => (
-          <button key={value} className={value <= rating ? "star-button active" : "star-button"} type="button" onClick={() => setRating(value)}>
-            <Star size={18} />
-          </button>
-        ))}
+      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <label style={{ fontSize: "13px", fontWeight: 600 }}>評価レーティング:</label>
+        <div style={{ display: "flex", gap: "4px" }}>
+          {[1, 2, 3, 4, 5].map((num) => (
+            <button key={num} type="button" onClick={() => setRating(num)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+              <Star size={20} fill={num <= rating ? "#fbbf24" : "none"} stroke={num <= rating ? "#fbbf24" : "#cbd5e1"} />
+            </button>
+          ))}
+        </div>
       </div>
-      <textarea value={comment} onChange={(e) => setComment(e.target.value)} />
-      <button className="primary-button" disabled={saving || !comment.trim()} type="submit">
-        <Star size={18} />
-        {saving ? "投稿中" : "評価する"}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        <label style={{ fontSize: "13px", fontWeight: 600 }}>評価コメント:</label>
+        <textarea value={comment} onChange={(e) => setComment(e.target.value)} style={{ width: "100%", height: "60px", padding: "8px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", fontFamily: "sans-serif" }} required />
+      </div>
+      <button className="primary-button" type="submit" disabled={saving} style={{ alignSelf: "start", background: "#10b981", color: "#fff", border: "none", padding: "8px 16px", fontSize: "13px" }}>
+        {saving ? "投稿中..." : "評価を送信して取引を完了する"}
       </button>
-      {message && <p className={message.includes("失敗") || message.includes("already") ? "error" : "notice inline-notice"}>{message}</p>}
+      {message && <p className={message.includes("失敗") ? "error" : "notice inline-notice"} style={{ margin: 0, fontSize: "13px", color: message.includes("失敗") ? "#ef4444" : "#047857" }}>{message}</p>}
     </form>
   );
 }
 
-interface PersonalStats {
-  summary: {
-    totalSales: number;
-    totalRevenue: number;
-    activeItems: number;
-    totalLikes: number;
-  };
-  categoryDistribution: { category: string; itemCount: number; totalValue: number }[];
-  dailyRevenue: { date: string; txCount: number; revenue: number }[];
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-interface BarterMemberDetail {
-  id: number;
-  itemId: number;
-  itemTitle: string;
-  itemImageUrl: string;
-  senderId: number;
-  senderName: string;
-  receiverId: number;
-  receiverName: string;
-  estimatedValue: number;
-  cashAdjustment: number;
-  accepted: boolean;
-  shippingStatus: "pending" | "shipped" | "received";
+function renderInline(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.*?)\*/g, "<em>$1</em>")
+    .replace(/`(.*?)`/g, "<code>$1</code>");
 }
 
-interface BarterLoopDetail {
-  id: number;
-  status: "proposal" | "shipping" | "completed" | "cancelled";
-  justification: string;
-  createdAt: string;
-  members: BarterMemberDetail[];
-}
-
-function MyPageScreen({
-  user,
-  myItems,
-  conversations = [],
-  api,
-  onSessionUpdated,
-  onOpenSell,
-  onOpenItem,
-  onCancelled
-}: {
-  user: User | null;
-  myItems: Item[];
-  conversations?: Conversation[];
-  api: <T>(path: string, options?: RequestInit) => Promise<T>;
-  onSessionUpdated: (token: string, user: User) => void;
-  onOpenSell: () => void;
-  onOpenItem: (itemId: number) => void;
-  onCancelled: (itemId: number) => Promise<void>;
-}) {
-  const [uploading, setUploading] = useState(false);
-  const [profileError, setProfileError] = useState("");
-
-  const [activeTab, setActiveTab] = useState<"listings" | "dashboard" | "barter">("listings");
-  const [stats, setStats] = useState<PersonalStats | null>(null);
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [statsError, setStatsError] = useState("");
-
-  // Compute active escrow dynamically
-  const escrowBalance = (conversations || []).reduce((acc, c) => {
-    if (c.purchaseStatus === "paid" || c.purchaseStatus === "shipped") {
-      return acc + c.itemPrice;
-    }
-    return acc;
-  }, 0);
-
-  // Barter Loop States
-  const [barterLoops, setBarterLoops] = useState<BarterLoopDetail[]>([]);
-  const [barterLoading, setBarterLoading] = useState(false);
-  const [barterError, setBarterError] = useState("");
-
-  const loadBarterLoops = () => {
-    setBarterLoading(true);
-    setBarterError("");
-    api<{ loops: BarterLoopDetail[] }>("/barter/loops")
-      .then((data) => {
-        setBarterLoops(data.loops || []);
-      })
-      .catch((err) => {
-        setBarterError(err instanceof Error ? err.message : "物々交換提案のロードに失敗しました");
-      })
-      .finally(() => setBarterLoading(false));
-  };
-
-  useEffect(() => {
-    if (activeTab === "dashboard" && !stats) {
-      setStatsLoading(true);
-      setStatsError("");
-      api<PersonalStats>("/my/stats")
-        .then((data) => {
-          setStats(data);
-          setStatsError("");
-        })
-        .catch((err) => {
-          setStatsError(err instanceof Error ? err.message : "個人分析データの取得に失敗しました");
-        })
-        .finally(() => setStatsLoading(false));
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (activeTab === "barter") {
-      loadBarterLoops();
-    }
-  }, [activeTab]);
-
-  const acceptBarter = async (loopId: number) => {
-    try {
-      await api(`/barter/loops/${loopId}/accept`, { method: "POST" });
-      loadBarterLoops();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "提案の承認に失敗しました");
-    }
-  };
-
-  const shipBarter = async (loopId: number) => {
-    try {
-      await api(`/barter/loops/${loopId}/ship`, { method: "POST" });
-      loadBarterLoops();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "発送通知に失敗しました");
-    }
-  };
-
-  const receiveBarter = async (loopId: number) => {
-    try {
-      await api(`/barter/loops/${loopId}/receive`, { method: "POST" });
-      loadBarterLoops();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "受取報告に失敗しました");
-    }
-  }
-
-  async function uploadAvatar(file: File | null) {
-    if (!file || !user) return;
-    setUploading(true);
-    setProfileError("");
-    try {
-      const signed = await api<{ uploadUrl: string; objectPath: string; contentType: string }>("/upload", {
-        method: "POST",
-        body: JSON.stringify({ filename: file.name, contentType: file.type, purpose: "avatar", visibility: "private" })
-      });
-      const response = await fetch(signed.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": signed.contentType },
-        body: file
-      });
-      if (!response.ok) {
-        throw new Error("プロフィール画像のアップロードに失敗しました");
-      }
-      const updated = await api<{ user: User; token: string }>("/profile", {
-        method: "POST",
-        body: JSON.stringify({ avatarPath: signed.objectPath, name: user.name })
-      });
-      onSessionUpdated(updated.token, updated.user);
-    } catch (err) {
-      setProfileError(err instanceof Error ? err.message : "プロフィール画像の更新に失敗しました");
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function cancelItem(itemId: number) {
-    try {
-      await api(`/items/${itemId}/cancel`, { method: "POST" });
-      await onCancelled(itemId);
-    } catch (err) {
-      setProfileError(err instanceof Error ? err.message : "出品の取り下げに失敗しました");
-    }
-  }
-
-  return (
-    <section className="page-shell">
-      <div className="split-heading">
-        <div>
-          <p className="eyebrow">My Page</p>
-          <h2>マイページ</h2>
-        </div>
-        <button className="primary-button" onClick={onOpenSell}>
-          <IconLabel icon={PackagePlus} label="新規" />
-        </button>
-      </div>
-
-      <section className="panel mypage-panel">
-        <div className="profile-panel" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "16px", width: "100%" }}>
-            <img className="profile-avatar" src={user?.avatarUrl || "/placeholder-avatar.svg"} alt="" />
-            <div className="profile-copy">
-              <strong>{user?.name ?? "ユーザー"}</strong>
-              <small>{user?.email ?? ""}</small>
-            </div>
-            <label className="upload-drop compact-upload" style={{ marginLeft: "auto" }}>
-              <UploadCloud size={18} />
-              <span>{uploading ? "更新中" : "写真を変更"}</span>
-              <input accept="image/*" disabled={uploading} type="file" onChange={(e) => void uploadAvatar(e.target.files?.[0] ?? null)} />
-            </label>
-          </div>
-
-          {user?.role === "admin" && (
-            <button className="primary-button" style={{ background: "#d85b46", color: "#fff", display: "flex", alignItems: "center", gap: "8px", padding: "10px 18px", borderRadius: "8px", marginTop: "12px", fontSize: "14px", fontWeight: 600, border: "none", cursor: "pointer", width: "100%", justifyContent: "center" }} onClick={() => navigate({ page: "admin", subpage: "stats" })}>
-              <ShieldAlert size={16} /> 🛡️ システム管理者ダッシュボードを開く
-            </button>
-          )}
-        </div>
-        {profileError && <p className="error">{profileError}</p>}
-
-        {/* Tab Controls */}
-        <div style={{ display: "flex", borderBottom: "2px solid #eadfd3", gap: "16px", margin: "24px 0 16px 0", flexWrap: "wrap" }}>
-          <button
-            className={`tab-link ${activeTab === "listings" ? "active" : ""}`}
-            onClick={() => setActiveTab("listings")}
-            style={{ background: "none", border: "none", padding: "10px 16px", fontWeight: 600, fontSize: "15px", color: activeTab === "listings" ? "#d85b46" : "#5c6b73", borderBottom: activeTab === "listings" ? "3px solid #d85b46" : "3px solid transparent", cursor: "pointer" }}
-          >
-            あなたの出品 ({myItems.length})
-          </button>
-          <button
-            className={`tab-link ${activeTab === "dashboard" ? "active" : ""}`}
-            onClick={() => setActiveTab("dashboard")}
-            style={{ background: "none", border: "none", padding: "10px 16px", fontWeight: 600, fontSize: "15px", color: activeTab === "dashboard" ? "#d85b46" : "#5c6b73", borderBottom: activeTab === "dashboard" ? "3px solid #d85b46" : "3px solid transparent", cursor: "pointer" }}
-          >
-            <TrendingUp size={16} style={{ marginRight: "4px", verticalAlign: "middle" }} /> マイ・ダッシュボード (個人分析)
-          </button>
-          <button
-            className={`tab-link ${activeTab === "barter" ? "active" : ""}`}
-            onClick={() => setActiveTab("barter")}
-            style={{ background: "none", border: "none", padding: "10px 16px", fontWeight: 600, fontSize: "15px", color: activeTab === "barter" ? "#d85b46" : "#5c6b73", borderBottom: activeTab === "barter" ? "3px solid #d85b46" : "3px solid transparent", cursor: "pointer" }}
-          >
-            🔄 AIわらしべ物々交換 ({barterLoops.length})
-          </button>
-        </div>
-
-        {activeTab === "listings" && (
-          <>
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">My Listings</p>
-                <h3>出品した商品</h3>
-              </div>
-            </div>
-            <div className="card-grid compact-grid">
-              {myItems.map((item) => (
-                <article key={item.id} className="catalog-card compact my-item-card">
-                  <img src={item.imageUrl || "/placeholder.svg"} alt="" />
-                  <div>
-                    <strong>{item.title}</strong>
-                    <span>¥{item.price.toLocaleString()}</span>
-                    <small>{statusLabel(item.status)}</small>
-                  </div>
-                  <div className="my-item-actions">
-                    <button className="ghost-button" onClick={() => onOpenItem(item.id)}>
-                      詳細
-                    </button>
-                    {item.status === "active" && (
-                      <button className="ghost-button danger-button" onClick={() => void cancelItem(item.id)}>
-                        取り下げ
-                      </button>
-                    )}
-                  </div>
-                </article>
-              ))}
-              {myItems.length === 0 && <p className="muted">まだ出品がありません。最初の1品を登録しましょう。</p>}
-            </div>
-          </>
-        )}
-
-        {activeTab === "dashboard" && (
-          <div className="personal-dashboard">
-            {statsLoading ? (
-              <div className="loading-state">分析データを集計中...</div>
-            ) : statsError ? (
-              <p className="error">{statsError}</p>
-            ) : !stats ? (
-              <p className="muted">データがありません</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-                {/* Summary Cards */}
-                <div className="stats-cards-grid" style={{ marginBottom: 0 }}>
-                  <div className="stat-card">
-                    <h3>獲得売上総額</h3>
-                    <p className="stat-number primary">¥ {(stats.summary?.totalRevenue || 0).toLocaleString()}</p>
-                  </div>
-                  <div className="stat-card">
-                    <h3>販売成立件数</h3>
-                    <p className="stat-number">{(stats.summary?.totalSales || 0).toLocaleString()} 件</p>
-                  </div>
-                  <div className="stat-card">
-                    <h3>出品中の商品数</h3>
-                    <p className="stat-number">{(stats.summary?.activeItems || 0).toLocaleString()} 点</p>
-                  </div>
-                  <div className="stat-card">
-                    <h3>獲得いいね総数</h3>
-                    <p className="stat-number">{(stats.summary?.totalLikes || 0).toLocaleString()} 回</p>
-                  </div>
-                </div>
-
-                <div className="stats-charts-grid">
-                  {/* Category Share */}
-                  <div className="chart-container">
-                    <h3>カテゴリー別出品割合</h3>
-                    <div className="chart-list">
-                      {(!stats.categoryDistribution || stats.categoryDistribution.length === 0) ? (
-                        <p className="empty-text">データがありません</p>
-                      ) : (
-                        stats.categoryDistribution.map((item) => {
-                          const maxCount = Math.max(...stats.categoryDistribution.map((c) => c.itemCount), 1);
-                          const pct = Math.round((item.itemCount / maxCount) * 100);
-                          return (
-                            <div key={item.category} className="chart-bar-row">
-                              <div className="chart-bar-label">
-                                <span>{item.category}</span>
-                                <small>{item.itemCount} 点 (¥{item.totalValue.toLocaleString()})</small>
-                              </div>
-                              <div className="chart-bar-bg">
-                                <div className="chart-bar-fill" style={{ width: `${pct}%`, background: "#d85b46" }}></div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Sales trend */}
-                  <div className="chart-container">
-                    <h3>日別売上推移 (直近30日)</h3>
-                    <div className="chart-list max-h-300">
-                      {(!stats.dailyRevenue || stats.dailyRevenue.length === 0) ? (
-                        <p className="empty-text">販売実績がまだありません</p>
-                      ) : (
-                        stats.dailyRevenue.map((item) => {
-                          const maxRev = Math.max(...stats.dailyRevenue.map((d) => d.revenue), 1);
-                          const pct = Math.round((item.revenue / maxRev) * 100);
-                          return (
-                            <div key={item.date} className="chart-bar-row">
-                              <div className="chart-bar-label">
-                                <span>{item.date} ({item.txCount} 件)</span>
-                                <strong>¥ {item.revenue.toLocaleString()}</strong>
-                              </div>
-                              <div className="chart-bar-bg">
-                                <div className="chart-bar-fill" style={{ width: `${pct}%`, background: "#47a8bd" }}></div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === "barter" && (
-          <div className="barter-dashboard" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            {barterLoading ? (
-              <div className="loading-state">物々交換提案を検索中...</div>
-            ) : barterError ? (
-              <p className="error">{barterError}</p>
-            ) : barterLoops.length === 0 ? (
-              <div className="empty-state" style={{ background: "#fffdf9", border: "1px solid #eadfd3", borderRadius: "12px", padding: "32px", textAlign: "center" }}>
-                <div style={{ fontSize: "32px", marginBottom: "12px" }}>🔄 🤖 🔄</div>
-                <h3 style={{ color: "#1f2933" }}>AIが物々交換ルートを探索しています</h3>
-                <p style={{ color: "#5c6b73", fontSize: "14px", margin: "8px 0 16px 0", lineHeight: "1.5" }}>
-                  現在、あなたを含む「物々交換ルート」をAIが自動探索しています。<br />
-                  出品フォームで「物々交換を許可」した商品を出品して、しばらくお待ちください。<br />
-                  （※待機中のユーザーが2人以上集まると、AIが自動的に物々交換の循環ループをマッチングしてここに表示します）
-                </p>
-                <button className="primary-button" onClick={onOpenSell} style={{ margin: "0 auto" }}>
-                  <PackagePlus size={18} /> 物々交換対象で商品を出品する
-                </button>
-              </div>
-            ) : (
-              barterLoops.map((loop) => {
-                const myLeg = loop.members.find((m) => m.senderId === user?.id || m.receiverId === user?.id);
-                if (!myLeg) return null;
-
-                const isSender = myLeg.senderId === user?.id;
-                const otherLegs = loop.members.filter((m) => m.id !== myLeg.id);
-
-                return (
-                  <div key={loop.id} style={{ background: "#ffffff", border: "2px solid #eadfd3", borderRadius: "12px", padding: "24px", display: "flex", flexDirection: "column", gap: "20px", boxShadow: "0 2px 6px rgba(0,0,0,0.05)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eadfd3", paddingBottom: "12px", flexWrap: "wrap", gap: "12px" }}>
-                      <div>
-                        <span style={{ background: loop.status === "completed" ? "#e1f8eb" : loop.status === "shipping" ? "#e3f3ff" : "#fffdf9", color: loop.status === "completed" ? "#1b8a5a" : loop.status === "shipping" ? "#0070f3" : "#5c6b73", padding: "4px 10px", borderRadius: "12px", fontSize: "12px", fontWeight: 700, textTransform: "uppercase" }}>
-                          {loop.status === "proposal" ? "提案中 (要全員承認)" : loop.status === "shipping" ? "📦 発送・取引進行中" : loop.status === "completed" ? "🎉 取引成立・完了" : "キャンセル"}
-                        </span>
-                        <strong style={{ marginLeft: "8px", fontSize: "15px" }}>AI物々交換ループ #{loop.id}</strong>
-                      </div>
-                      <small style={{ color: "#7d8b99" }}>提案日時: {new Date(loop.createdAt).toLocaleString()}</small>
-                    </div>
-
-                    <div style={{ background: "#fffdf9", borderRadius: "8px", padding: "16px", border: "1px solid #eadfd3" }}>
-                      <strong style={{ fontSize: "13px", color: "#7d8b99", display: "block", marginBottom: "12px" }}>🔄 交換サイクル・相関関係</strong>
-                      
-                      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        {loop.members.map((m, idx) => {
-                          const isMeSender = m.senderId === user?.id;
-                          const isMeReceiver = m.receiverId === user?.id;
-
-                          return (
-                            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px", background: isMeSender || isMeReceiver ? "#ffefe9" : "#ffffff", border: isMeSender || isMeReceiver ? "1px solid #ffccb8" : "1px solid #eadfd3", borderRadius: "8px", flexWrap: "wrap" }}>
-                              <img src={m.itemImageUrl || "/placeholder.svg"} alt="" style={{ width: "48px", height: "48px", borderRadius: "6px", objectFit: "cover", border: "1px solid #eadfd3" }} />
-                              <div style={{ flex: 1, minWidth: "150px" }}>
-                                <div style={{ fontSize: "11px", color: "#7d8b99", fontWeight: 600 }}>商品提供レッグ {idx + 1}</div>
-                                <strong style={{ fontSize: "14px", color: "#1f2933" }}>{m.itemTitle}</strong>
-                                <div style={{ fontSize: "12px", color: "#5c6b73", marginTop: "2px" }}>
-                                  送り手: <strong>{m.senderName} {isMeSender && "(あなた)"}</strong> ➔ 受け手: <strong>{m.receiverName} {isMeReceiver && "(あなた)"}</strong>
-                                </div>
-                              </div>
-                              <div style={{ textAlign: "right", minWidth: "120px" }}>
-                                <div style={{ fontSize: "13px", fontWeight: 700 }}>AI査定価値: ¥{m.estimatedValue.toLocaleString()}</div>
-                                <div style={{ fontSize: "12px", color: m.cashAdjustment > 0 ? "#1b8a5a" : m.cashAdjustment < 0 ? "#9d372c" : "#5c6b73", fontWeight: 600, marginTop: "2px" }}>
-                                  {m.cashAdjustment > 0 ? `差額受取: +¥${m.cashAdjustment.toLocaleString()}` : m.cashAdjustment < 0 ? `差額支払: -¥${Math.abs(m.cashAdjustment).toLocaleString()}` : "差額清算なし"}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div style={{ fontSize: "13px", color: "#5c6b73", background: "#f5f7fa", padding: "14px 16px", borderRadius: "8px", lineHeight: "1.5" }}>
-                      💡 <strong>AIによる査定調停理由:</strong><br />
-                      {loop.justification}
-                    </div>
-
-                    {loop.status === "proposal" ? (
-                      <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                        <div style={{ flex: 1, minWidth: "200px" }}>
-                          <div style={{ fontSize: "13px", fontWeight: 600 }}>あなたの現在の承認状況:</div>
-                          <div style={{ fontSize: "14px", color: myLeg.accepted ? "#1b8a5a" : "#9d6f1a", fontWeight: 700, marginTop: "2px" }}>
-                            {myLeg.accepted ? "✅ 承認済み（他メンバーの承認を待っています）" : "⏳ 未承認（下のボタンから承認してください）"}
-                          </div>
-                        </div>
-                        {!myLeg.accepted && (
-                          <button className="primary-button" onClick={() => void acceptBarter(loop.id)} style={{ background: "#d85b46", color: "#ffffff" }}>
-                            <Bot size={16} /> この物々交換提案を承認する
-                          </button>
-                        )}
-                      </div>
-                    ) : loop.status === "shipping" ? (
-                      <div style={{ borderTop: "1px solid #eadfd3", paddingTop: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
-                        <div>
-                          <strong style={{ fontSize: "14px" }}>📦 物々交換発送管理ステータス</strong>
-                          <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#7d8b99" }}>メンバー全員が発送し、全員が受取報告をすると取引完了になります。</p>
-                        </div>
-
-                        <div style={{ display: "grid", gap: "12px", gridTemplateColumns: "1fr 1fr" }}>
-                          <div style={{ border: "1px solid #eadfd3", borderRadius: "8px", padding: "14px", background: "#fffdf9" }}>
-                            <strong style={{ fontSize: "13px", color: "#d85b46" }}>📤 あなたの発送タスク</strong>
-                            <p style={{ margin: "4px 0 8px 0", fontSize: "12px" }}>
-                              商品「<strong>{myLeg.itemTitle}</strong>」を <strong>{myLeg.receiverName} さん</strong> 宛に発送してください。
-                            </p>
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <span style={{ fontSize: "13px", fontWeight: 700, color: myLeg.shippingStatus !== "pending" ? "#1b8a5a" : "#9d6f1a" }}>
-                                状態: {myLeg.shippingStatus === "pending" ? "未発送 ⏳" : "発送完了 ✅"}
-                              </span>
-                              {myLeg.shippingStatus === "pending" && (
-                                <button className="ghost-button" onClick={() => void shipBarter(loop.id)} style={{ marginLeft: "auto", background: "#ffffff", borderColor: "#d85b46", color: "#d85b46" }}>
-                                  発送完了を報告
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          {(() => {
-                            const recLeg = loop.members.find((m) => m.receiverId === user?.id);
-                            if (!recLeg) return null;
-                            return (
-                              <div style={{ border: "1px solid #eadfd3", borderRadius: "8px", padding: "14px", background: "#fffdf9" }}>
-                                <strong style={{ fontSize: "13px", color: "#0070f3" }}>📥 あなたの受取確認タスク</strong>
-                                <p style={{ margin: "4px 0 8px 0", fontSize: "12px" }}>
-                                  <strong>{recLeg.senderName} さん</strong> から商品「<strong>{recLeg.itemTitle}</strong>」が届きます。<br />
-                                  差額調整額: <strong>{recLeg.cashAdjustment > 0 ? `+¥${recLeg.cashAdjustment.toLocaleString()} 受取` : `¥${Math.abs(recLeg.cashAdjustment).toLocaleString()} 支払`}</strong>
-                                </p>
-                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                  <span style={{ fontSize: "13px", fontWeight: 700, color: recLeg.shippingStatus === "received" ? "#1b8a5a" : "#9d6f1a" }}>
-                                    状態: {recLeg.shippingStatus === "received" ? "受取・取引完了 ✅" : recLeg.shippingStatus === "shipped" ? "相手が発送済み 📦" : "相手の発送待ち ⏳"}
-                                  </span>
-                                  {recLeg.shippingStatus === "shipped" && (
-                                    <button className="ghost-button" onClick={() => void receiveBarter(loop.id)} style={{ marginLeft: "auto", background: "#ffffff", borderColor: "#0070f3", color: "#0070f3" }}>
-                                      商品を受け取りました
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ background: "#e1f8eb", borderRadius: "8px", padding: "12px", textAlign: "center", fontSize: "14px", color: "#1b8a5a", fontWeight: 700 }}>
-                        🎉 この物々交換取引は完全に終了しました。おめでとうございます！
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-      </section>
-    </section>
-  );
-}
-
-function readRoute(): Route {
-  const hash = window.location.hash.replace(/^#/, "");
-  if (hash === "sell") return { page: "sell" };
-  if (hash === "messages") return { page: "messages" };
-  if (hash === "mypage") return { page: "mypage" };
-  if (hash === "help") return { page: "help" };
-  if (hash.startsWith("item/")) {
-    const itemId = Number(hash.split("/")[1]);
-    if (Number.isFinite(itemId)) {
-      return { page: "item", itemId };
-    }
-  }
-  if (hash.startsWith("admin/")) {
-    const sub = hash.split("/")[1] as "stats" | "moderations" | "users";
-    if (sub === "stats" || sub === "moderations" || sub === "users") {
-      return { page: "admin", subpage: sub };
-    }
-    return { page: "admin", subpage: "stats" };
-  }
-  if (hash === "admin") {
-    return { page: "admin", subpage: "stats" };
-  }
-  if (hash === "home") return { page: "home" };
-  return { page: "auth" };
-}
-
-function normalizeRoute(route: Route, authenticated: boolean): Route {
-  if (!authenticated) return { page: "auth" };
-  return route.page === "auth" ? { page: "home" } : route;
-}
-
-function navigate(route: Route) {
-  const hash =
-    route.page === "item"
-      ? `item/${route.itemId}`
-      : route.page === "admin"
-        ? `admin/${route.subpage}`
-        : route.page === "home"
-          ? "home"
-          : route.page;
-  window.location.hash = hash;
-}
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
-}
-
-function statusLabel(status: Item["status"] | Conversation["itemStatus"]) {
-  if (status === "sold") return "売却済み";
-  if (status === "hidden") return "公開停止";
-  return "販売中";
-}
-
-function ratingLabel(avg: number, count: number) {
-  if (!count) return "評価なし";
-  return `★ ${avg.toFixed(1)} (${count}件)`;
-}
-
-function renderMarkdown(source: string) {
-  const lines = source.replace(/\r\n/g, "\n").split("\n");
+function renderMarkdown(text: string): string {
+  const lines = text.split("\n");
   const html: string[] = [];
   let inList = false;
   let inCodeBlock = false;
@@ -2218,20 +1464,15 @@ function renderMarkdown(source: string) {
     inList = false;
   };
 
-  const closeCodeBlock = () => {
-    if (!inCodeBlock) return;
-    html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-    inCodeBlock = false;
-    codeLines = [];
-  };
-
-  for (const line of lines) {
+  for (let line of lines) {
     if (line.trim().startsWith("```")) {
-      flushParagraph();
-      closeList();
       if (inCodeBlock) {
-        closeCodeBlock();
+        html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+        codeLines = [];
+        inCodeBlock = false;
       } else {
+        flushParagraph();
+        closeList();
         inCodeBlock = true;
       }
       continue;
@@ -2249,7 +1490,6 @@ function renderMarkdown(source: string) {
       flushParagraph();
       closeList();
       const level = Math.min(heading[1].length, 3);
-      // SECURITY FIX: Explicitly escape heading content before rendering to mitigate Stored XSS
       html.push(`<h${level}>${renderInline(escapeHtml(heading[2]))}</h${level}>`);
       continue;
     }
@@ -2260,7 +1500,6 @@ function renderMarkdown(source: string) {
         html.push("<ul>");
         inList = true;
       }
-      // SECURITY FIX: Explicitly escape bullet list content before rendering to mitigate Stored XSS
       html.push(`<li>${renderInline(escapeHtml(bullet[1]))}</li>`);
       continue;
     }
@@ -2276,698 +1515,10 @@ function renderMarkdown(source: string) {
 
   flushParagraph();
   closeList();
-  closeCodeBlock();
 
-  return html.join("");
+  return html.join("\n");
 }
 
-function renderInline(text: string) {
-  return text
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+function renderMarkdownText(text: string) {
+  return renderMarkdown(text);
 }
-
-function escapeHtml(text: string) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function loadUser() {
-  const raw = localStorage.getItem("user");
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as User;
-  } catch {
-    return null;
-  }
-}
-
-// ==========================================
-// Admin Dashboard Components
-// ==========================================
-
-interface AdminStats {
-  summary: {
-    totalUsers: number;
-    totalItems: number;
-    totalTransactions: number;
-    totalRevenue: number;
-  };
-  dailySignups: { date: string; count: number }[];
-  dailyTransactions: { date: string; txCount: number; revenue: number }[];
-  categoryDistribution: { category: string; itemCount: number; totalValue: number }[];
-}
-
-interface AdminModerationRecord {
-  id: number;
-  itemId: number;
-  itemTitle: string;
-  userId: number;
-  userName: string;
-  prohibited: boolean;
-  riskLevel: string;
-  reasons: string[];
-  blockedKeywords: string[];
-  createdAt: string;
-}
-
-interface AdminUserRecord {
-  id: number;
-  name: string;
-  email: string;
-  role: string;
-  avatarUrl: string;
-  createdAt: string;
-}
-
-function AdminDashboardScreen({
-  api,
-  currentSubpage,
-  onSubpageChange,
-}: {
-  api: <T>(path: string, options?: RequestInit) => Promise<T>;
-  currentSubpage: "stats" | "moderations" | "users";
-  onSubpageChange: (subpage: "stats" | "moderations" | "users") => void;
-}) {
-  return (
-    <section className="screen admin-screen">
-      <div className="admin-header">
-        <h2 className="section-title">管理者ダッシュボード</h2>
-        <div className="admin-subnav">
-          <button
-            className={`tab-link ${currentSubpage === "stats" ? "active" : ""}`}
-            onClick={() => onSubpageChange("stats")}
-          >
-            <TrendingUp size={16} /> 分析・統計
-          </button>
-          <button
-            className={`tab-link ${currentSubpage === "moderations" ? "active" : ""}`}
-            onClick={() => onSubpageChange("moderations")}
-          >
-            <ShieldAlert size={16} /> AI出品審査履歴
-          </button>
-          <button
-            className={`tab-link ${currentSubpage === "users" ? "active" : ""}`}
-            onClick={() => onSubpageChange("users")}
-          >
-            <Users size={16} /> ユーザー管理
-          </button>
-        </div>
-      </div>
-
-      <div className="admin-content">
-        {currentSubpage === "stats" && <AdminStatsView api={api} />}
-        {currentSubpage === "moderations" && <AdminModerationView api={api} />}
-        {currentSubpage === "users" && <AdminUsersView api={api} />}
-      </div>
-    </section>
-  );
-}
-
-function AdminStatsView({
-  api,
-}: {
-  api: <T>(path: string, options?: RequestInit) => Promise<T>;
-}) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [stats, setStats] = useState<AdminStats | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    api<AdminStats>("/admin/stats")
-      .then((data) => {
-        setStats(data);
-        setError("");
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "統計データの取得に失敗しました");
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div className="loading-state">読み込み中...</div>;
-  if (error) return <div className="error-message">{error}</div>;
-  if (!stats) return null;
-
-  const maxSignup = Math.max(...(stats.dailySignups || []).map((d) => d.count), 1);
-  const maxRevenue = Math.max(...(stats.dailyTransactions || []).map((d) => d.revenue), 1);
-  const maxItemCount = Math.max(...(stats.categoryDistribution || []).map((c) => c.itemCount), 1);
-
-  return (
-    <div className="admin-stats-view">
-      {/* Summary Cards */}
-      <div className="stats-cards-grid">
-        <div className="stat-card">
-          <h3>総ユーザー数</h3>
-          <p className="stat-number">{(stats.summary?.totalUsers || 0).toLocaleString()} 名</p>
-        </div>
-        <div className="stat-card">
-          <h3>総出品数</h3>
-          <p className="stat-number">{(stats.summary?.totalItems || 0).toLocaleString()} 点</p>
-        </div>
-        <div className="stat-card">
-          <h3>取引完了数</h3>
-          <p className="stat-number">{(stats.summary?.totalTransactions || 0).toLocaleString()} 件</p>
-        </div>
-        <div className="stat-card">
-          <h3>総売上高</h3>
-          <p className="stat-number primary">¥ {(stats.summary?.totalRevenue || 0).toLocaleString()}</p>
-        </div>
-      </div>
-
-      <div className="stats-charts-grid">
-        {/* Category Share */}
-        <div className="chart-container">
-          <h3>カテゴリー別出品割合</h3>
-          <div className="chart-list">
-            {(!stats.categoryDistribution || stats.categoryDistribution.length === 0) ? (
-              <p className="empty-text">データがありません</p>
-            ) : (
-              stats.categoryDistribution.map((item) => {
-                const pct = Math.round((item.itemCount / maxItemCount) * 100);
-                return (
-                  <div key={item.category} className="chart-bar-row">
-                    <div className="chart-bar-label">
-                      <span>{item.category}</span>
-                      <small>{item.itemCount} 点 (¥{(item.totalValue || 0).toLocaleString()})</small>
-                    </div>
-                    <div className="chart-bar-bg">
-                      <div className="chart-bar-fill" style={{ width: `${pct}%` }}></div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Daily Registrations */}
-        <div className="chart-container">
-          <h3>日別新規ユーザー登録数 (直近30日)</h3>
-          <div className="chart-list max-h-300">
-            {(!stats.dailySignups || stats.dailySignups.length === 0) ? (
-              <p className="empty-text">データがありません</p>
-            ) : (
-              stats.dailySignups.map((item) => {
-                const pct = Math.round((item.count / maxSignup) * 100);
-                return (
-                  <div key={item.date} className="chart-bar-row">
-                    <div className="chart-bar-label">
-                      <span>{item.date}</span>
-                      <strong>{item.count} 名</strong>
-                    </div>
-                    <div className="chart-bar-bg">
-                      <div className="chart-bar-fill accent" style={{ width: `${pct}%` }}></div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Daily Transactions */}
-        <div className="chart-container full-width">
-          <h3>日別取引売上高 (直近30日)</h3>
-          <div className="chart-list max-h-300">
-            {(!stats.dailyTransactions || stats.dailyTransactions.length === 0) ? (
-              <p className="empty-text">データがありません</p>
-            ) : (
-              stats.dailyTransactions.map((item) => {
-                const pct = Math.round((item.revenue / maxRevenue) * 100);
-                return (
-                  <div key={item.date} className="chart-bar-row">
-                    <div className="chart-bar-label">
-                      <span>{item.date} ({item.txCount} 件の取引)</span>
-                      <strong>¥ {(item.revenue || 0).toLocaleString()}</strong>
-                    </div>
-                    <div className="chart-bar-bg">
-                      <div className="chart-bar-fill primary-fill" style={{ width: `${pct}%` }}></div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdminModerationView({
-  api,
-}: {
-  api: <T>(path: string, options?: RequestInit) => Promise<T>;
-}) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [moderations, setModerations] = useState<AdminModerationRecord[]>([]);
-
-  useEffect(() => {
-    setLoading(true);
-    api<{ moderations: AdminModerationRecord[] }>("/admin/moderations")
-      .then((data) => {
-        setModerations(data.moderations || []);
-        setError("");
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "審査履歴の取得に失敗しました");
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div className="loading-state">読み込み中...</div>;
-  if (error) return <div className="error-message">{error}</div>;
-
-  return (
-    <div className="admin-moderation-view">
-      <h3>AI出品審査・不適切コンテンツ検知ログ</h3>
-      <p className="subtitle">OpenAIの画像・テキスト解析によって検知された不適切な出品の一覧です。</p>
-
-      {moderations.length === 0 ? (
-        <div className="empty-state">
-          <p>出品審査ログはまだありません。</p>
-        </div>
-      ) : (
-        <div className="table-responsive">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>日時</th>
-                <th>商品ID</th>
-                <th>商品名</th>
-                <th>出品者</th>
-                <th>リスク判定</th>
-                <th>出品禁止</th>
-                <th>検出キーワード</th>
-                <th>AI検知理由</th>
-              </tr>
-            </thead>
-            <tbody>
-              {moderations.map((m) => {
-                const badgeColor =
-                  m.riskLevel === "high"
-                    ? "danger"
-                    : m.riskLevel === "medium"
-                    ? "warning"
-                    : "success";
-                return (
-                  <tr key={m.id}>
-                    <td className="whitespace-nowrap small-text text-nowrap">
-                      {new Date(m.createdAt).toLocaleString("ja-JP", {
-                        month: "numeric",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td>#{m.itemId}</td>
-                    <td>
-                      <a href={`#item/${m.itemId}`} className="item-link">
-                        {m.itemTitle}
-                      </a>
-                    </td>
-                    <td className="small-text">{m.userName} (ID:{m.userId})</td>
-                    <td>
-                      <span className={`risk-badge ${badgeColor}`}>
-                        {m.riskLevel.toUpperCase()}
-                      </span>
-                    </td>
-                    <td>
-                      {m.prohibited ? (
-                        <span className="danger-text font-bold">禁止判定 (ブロック)</span>
-                      ) : (
-                        <span className="success-text">許可</span>
-                      )}
-                    </td>
-                    <td className="small-text max-w-150">
-                      {m.blockedKeywords.length > 0 ? (
-                        <div className="tag-list">
-                          {m.blockedKeywords.map((tag) => (
-                            <span key={tag} className="keyword-tag">
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-gray">-</span>
-                      )}
-                    </td>
-                    <td className="small-text reasons-cell">
-                      <ul className="reasons-list">
-                        {m.reasons.map((r, i) => (
-                          <li key={i}>{r}</li>
-                        ))}
-                      </ul>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AdminUsersView({
-  api,
-}: {
-  api: <T>(path: string, options?: RequestInit) => Promise<T>;
-}) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [users, setUsers] = useState<AdminUserRecord[]>([]);
-  const [updatingId, setUpdatingId] = useState<number | null>(null);
-
-  const loadUsers = () => {
-    setLoading(true);
-    api<{ users: AdminUserRecord[] }>("/admin/users")
-      .then((data) => {
-        setUsers(data.users || []);
-        setError("");
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "ユーザー一覧の取得に失敗しました");
-      })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    loadUsers();
-  }, []);
-
-  const changeRole = async (userId: number, newRole: string) => {
-    setUpdatingId(userId);
-    try {
-      await api<any>(`/admin/users/${userId}/role`, {
-        method: "PUT",
-        body: JSON.stringify({ role: newRole }),
-      });
-      setUsers((current) =>
-        current.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
-      );
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "ロールの変更に失敗しました");
-    } finally {
-      setUpdatingId(null);
-    }
-  };
-
-  if (loading) return <div className="loading-state">読み込み中...</div>;
-  if (error) return <div className="error-message">{error}</div>;
-
-  return (
-    <div className="admin-users-view">
-      <h3>プラットフォームユーザー管理</h3>
-      <p className="subtitle">
-        登録ユーザーの一覧表示および権限（ロール）の変更を行うことができます。
-      </p>
-
-      <div className="table-responsive">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>アバター</th>
-              <th>ユーザーID</th>
-              <th>名前</th>
-              <th>メールアドレス</th>
-              <th>登録日</th>
-              <th>ロール権限</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td>
-                  <img
-                    src={u.avatarUrl || "./placeholder-avatar.svg"}
-                    alt={u.name}
-                    className="avatar-img"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = "./placeholder-avatar.svg";
-                    }}
-                  />
-                </td>
-                <td>#{u.id}</td>
-                <td><strong>{u.name}</strong></td>
-                <td>{u.email}</td>
-                <td className="small-text text-nowrap">
-                  {new Date(u.createdAt).toLocaleDateString("ja-JP", {
-                    year: "numeric",
-                    month: "numeric",
-                    day: "numeric",
-                  })}
-                </td>
-                <td>
-                  <select
-                    value={u.role}
-                    disabled={updatingId === u.id}
-                    onChange={(e) => void changeRole(u.id, e.target.value)}
-                    className="admin-role-select"
-                  >
-                    <option value="user">一般ユーザー (user)</option>
-                    <option value="admin">管理者 (admin)</option>
-                  </select>
-                  {updatingId === u.id && <span className="updating-spinner">...</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ==========================================
-// Interactive Help Screen Component
-// ==========================================
-
-function HelpScreen({ onOpenSell }: { onOpenSell: () => void }) {
-  const [tab, setTab] = useState<"negotiate" | "barter" | "scene" | "suggest" | "dashboard">("negotiate");
-
-  return (
-    <section className="screen help-screen" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-      <div className="admin-header" style={{ borderBottom: "2px solid #eadfd3", paddingBottom: "16px" }}>
-        <h2 className="section-title">💡 アプリ機能解説・技術ガイド</h2>
-        <p style={{ margin: "4px 0 0 0", color: "#5c6b73", fontSize: "14px" }}>
-          Next Market に搭載された最先端のAI機能と、独自のアルゴリズムシステムについて解説します。
-        </p>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: "24px", alignItems: "start" }}>
-        {/* Sidebar Tabs */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <button
-            onClick={() => setTab("negotiate")}
-            style={{
-              padding: "12px 16px",
-              borderRadius: "8px",
-              border: "1px solid #eadfd3",
-              background: tab === "negotiate" ? "#d85b46" : "#ffffff",
-              color: tab === "negotiate" ? "#ffffff" : "#1f2933",
-              fontWeight: 600,
-              fontSize: "14px",
-              textAlign: "left",
-              cursor: "pointer",
-              transition: "all 0.2s"
-            }}
-          >
-            🤖 AI代理交渉
-          </button>
-          <button
-            onClick={() => setTab("barter")}
-            style={{
-              padding: "12px 16px",
-              borderRadius: "8px",
-              border: "1px solid #eadfd3",
-              background: tab === "barter" ? "#d85b46" : "#ffffff",
-              color: tab === "barter" ? "#ffffff" : "#1f2933",
-              fontWeight: 600,
-              fontSize: "14px",
-              textAlign: "left",
-              cursor: "pointer",
-              transition: "all 0.2s"
-            }}
-          >
-            🔄 AIわらしべ物々交換
-          </button>
-          <button
-            onClick={() => setTab("scene")}
-            style={{
-              padding: "12px 16px",
-              borderRadius: "8px",
-              border: "1px solid #eadfd3",
-              background: tab === "scene" ? "#d85b46" : "#ffffff",
-              color: tab === "scene" ? "#ffffff" : "#1f2933",
-              fontWeight: 600,
-              fontSize: "14px",
-              textAlign: "left",
-              cursor: "pointer",
-              transition: "all 0.2s"
-            }}
-          >
-            📸 AI使用風景合成
-          </button>
-          <button
-            onClick={() => setTab("suggest")}
-            style={{
-              padding: "12px 16px",
-              borderRadius: "8px",
-              border: "1px solid #eadfd3",
-              background: tab === "suggest" ? "#d85b46" : "#ffffff",
-              color: tab === "suggest" ? "#ffffff" : "#1f2933",
-              fontWeight: 600,
-              fontSize: "14px",
-              textAlign: "left",
-              cursor: "pointer",
-              transition: "all 0.2s"
-            }}
-          >
-            💡 商品説明・価格査定
-          </button>
-          <button
-            onClick={() => setTab("dashboard")}
-            style={{
-              padding: "12px 16px",
-              borderRadius: "8px",
-              border: "1px solid #eadfd3",
-              background: tab === "dashboard" ? "#d85b46" : "#ffffff",
-              color: tab === "dashboard" ? "#ffffff" : "#1f2933",
-              fontWeight: 600,
-              fontSize: "14px",
-              textAlign: "left",
-              cursor: "pointer",
-              transition: "all 0.2s"
-            }}
-          >
-            📊 分析ダッシュボード
-          </button>
-        </div>
-
-        {/* Tab Content Display */}
-        <div style={{ background: "#ffffff", border: "2px solid #eadfd3", borderRadius: "12px", padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
-          {tab === "negotiate" && (
-            <>
-              <h3 style={{ margin: 0, color: "#d85b46" }}>🤖 AI Agent Price Negotiation（エージェント・フリマ）</h3>
-              <p style={{ margin: 0, fontSize: "14px", color: "#5c6b73", lineHeight: "1.6" }}>
-                「値下げ交渉、AIに丸投げしませんか？」をテーマに、買い手・売り手双方が代理AIエージェントに駆け引きを完全に委託できる次世代の交渉取引です。
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px", borderTop: "1px solid #eadfd3", paddingTop: "16px" }}>
-                <strong>🚀 使い方・体験ステップ:</strong>
-                <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "14px", color: "#1f2933", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <li>商品を出品する際、「最低許容価格」と「交渉AIの性格（大阪商人、エリート、アニメキャラ）」を設定します。</li>
-                  <li>他のユーザーがその商品の詳細ページを開き、<strong>「AI交渉購入」</strong>ボタンをクリックします。</li>
-                  <li>予算と欲しい度を入力して交渉を開始すると、極秘交渉室にて両者のAIエージェントがタフな交渉を実況対話！</li>
-                  <li>合意に達すると自動決済され、不成立なら交渉履歴が表示されます。</li>
-                </ol>
-              </div>
-              <div style={{ background: "#f5f7fa", padding: "16px", borderRadius: "8px", fontSize: "13px", color: "#5c6b73", borderLeft: "4px solid #d85b46" }}>
-                🛡️ <strong>技術的なハイライト (Backend / AI):</strong><br />
-                Goで開発された自律交渉エンジンが、OpenAI（gpt-4o-mini）とマルチターン対話を行い、合意時に `SELECT FOR UPDATE` によるデータベースロック付きトランザクションを走らせ、安全に売却を確定させます。
-              </div>
-            </>
-          )}
-
-          {tab === "barter" && (
-            <>
-              <h3 style={{ margin: 0, color: "#d85b46" }}>🔄 Barter Loop（AIマルチホップ物々交換プラットフォーム）</h3>
-              <p style={{ margin: 0, fontSize: "14px", color: "#5c6b73", lineHeight: "1.6" }}>
-                お金を使わない物々交換。ユーザー間の「売りたい（手放したい）もの」と「欲しいジャンル」の依存関係をAIが自動検出し、3者以上の循環ループ（わらしべ長者ネットワーク）を自動検出します。
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px", borderTop: "1px solid #eadfd3", paddingTop: "16px" }}>
-                <strong>🚀 使い方・体験ステップ:</strong>
-                <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "14px", color: "#1f2933", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <li>商品を出品する際、<strong>「物々交換を許可」</strong>にチェックを入れ、「最も欲しいカテゴリー（ジャンル）」を選択します。</li>
-                  <li>待機ユーザーが2人以上集まると、バックグラウンドのAI走査が循環ループを検出し、マイページの「物々交換」タブに提案します。</li>
-                  <li>3者の商品の市場価値の違いをAIが適正評価し、取引を完全に等価にするための「清算差額調整金」を算出します。</li>
-                  <li>全員が提案を承認すると、3者間での複数人同時発送・受取チェックボードが有効になります。</li>
-                </ol>
-              </div>
-              <div style={{ background: "#f5f7fa", padding: "16px", borderRadius: "8px", fontSize: "13px", color: "#5c6b73", borderLeft: "4px solid #d85b46" }}>
-                🛡️ <strong>技術的なハイライト (Algorithm / Graph):</strong><br />
-                Goバックエンド内で、深さ優先探索（DFS）閉路検出アルゴリズムを実行し、検出したループに対してOpenAIが「プール内調整額の総和がちょうど0円（ゼロサム）」になるよう財務調停を行います。30分に1回の自動走査、およびバッチ効率化のための動的スキップ機能を搭載。
-              </div>
-            </>
-          )}
-
-          {tab === "scene" && (
-            <>
-              <h3 style={{ margin: 0, color: "#d85b46" }}>📸 AI使用風景生成 (Scene Generation)</h3>
-              <p style={{ margin: 0, fontSize: "14px", color: "#5c6b73", lineHeight: "1.6" }}>
-                商品詳細ページで、商品写真とユーザーのプロフィール写真（アバター）をAIが自動合成し、ユーザーがその商品を使用しているカスタムライフスタイル写真を生成します。
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px", borderTop: "1px solid #eadfd3", paddingTop: "16px" }}>
-                <strong>🚀 使い方・体験ステップ:</strong>
-                <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "14px", color: "#1f2933", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <li>マイページでプロフィール写真を登録（変更）します。</li>
-                  <li>任意の商品の詳細ページを開き、下部の<strong>「AI使用風景を生成」</strong>ボタンをクリックします。</li>
-                  <li>AI（DALL-E Image Edit）が、あなたと商品の写真をマージしたパーソナライズされた使用風景画像を生成し、永続化されます。</li>
-                </ol>
-              </div>
-              <div style={{ background: "#f5f7fa", padding: "16px", borderRadius: "8px", fontSize: "13px", color: "#5c6b73", borderLeft: "4px solid #d85b46" }}>
-                🛡️ <strong>技術的なハイライト (Mime-Type Injection):</strong><br />
-                OpenAI Image Edit APIが要求する正しいマルチパートフォーマットをGoバックエンドが手動ヘッダー構築（`textproto`）で生成し、`image/jpeg`, `image/png` などのMime-Typeを動的注入することで、不適合エラーを完全に回避。
-              </div>
-            </>
-          )}
-
-          {tab === "suggest" && (
-            <>
-              <h3 style={{ margin: 0, color: "#d85b46" }}>💡 AI商品説明生成 & 適正価格査定</h3>
-              <p style={{ margin: 0, fontSize: "14px", color: "#5c6b73", lineHeight: "1.6" }}>
-                出品手続きを最も簡単にするため、商品名・カテゴリ・状態・メモから、AIが自動で売れやすい商品説明文を作成し、市場価値を推定して推奨価格・最低価格を自動セットします。
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px", borderTop: "1px solid #eadfd3", paddingTop: "16px" }}>
-                <strong>🚀 使い方・体験ステップ:</strong>
-                <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "14px", color: "#1f2933", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <li>出品画面（Sell）で、商品名、カテゴリをワンタップでピル選択します。</li>
-                  <li>状態と、AIに特に伝えてほしい特徴（軽い、美品など）をメモに入力します。</li>
-                  <li><strong>「OpenAIで説明生成」</strong>をクリックすると商品説明が自動入力され、<strong>「価格を提案」</strong>をクリックすると適正価格と最低許容価格が自動セットされます。</li>
-                </ol>
-              </div>
-              <div style={{ background: "#f5f7fa", padding: "16px", borderRadius: "8px", fontSize: "13px", color: "#5c6b73", borderLeft: "4px solid #d85b46" }}>
-                🛡️ <strong>技術的なハイライト (JSON Mode / Clamp):</strong><br />
-                OpenAIの `response_format: json_object`（JSONモード）による確実な構造化データ抽出、および価格の上限・下限のブレを合理的な範囲内に丸める自動クランプ処理を Go 側で実施しています。
-              </div>
-            </>
-          )}
-
-          {tab === "dashboard" && (
-            <>
-              <h3 style={{ margin: 0, color: "#d85b46" }}>📊 分析ダッシュボード ＆ 💳 Stripeエスクロー決済・物流シミュレーション</h3>
-              <p style={{ margin: 0, fontSize: "14px", color: "#5c6b73", lineHeight: "1.6" }}>
-                個人売上高やカテゴリ比率、プラットフォームKPIを一元管理する「ダブル・ダッシュボード」に加え、商用運用に不可欠な「Stripe決済 ＆ 取引ナビ・物流エスクロー保護システム」を完全再現しています。
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px", borderTop: "1px solid #eadfd3", paddingTop: "16px" }}>
-                <strong>🚀 使い方・体験ステップ:</strong>
-                <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "14px", color: "#1f2933", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <li>商品を購入する際、実運用のStripe checkoutを模したクレジットカード決済モーダルが表示されます。ダミー情報を入力し「決済を実行」すると、代金は安全にプラットフォーム（エスクロープール）へ一時保管されます。</li>
-                  <li>買い手・売り手双方向のDM（チャット）を開くと、最上部に「Stripe エスクロー取引ナビ」が自動出現！</li>
-                  <li>売り手が「商品を発送したことを通知する」、買い手が荷物を確認後に「商品を受け取ったので取引を完了する」をタップすると、エスクロー保護が自動解除され、売上が出品者の「引き出し可能残高」へ確定反映されます。</li>
-                  <li>マイページのマイ・ダッシュボードでは、「確定売上高」と「現在エスクロー預かり中の資金」を統合ウォレットとして動的に監視でき、銀行口座への出金申請（Connect自動送金）も行えます。</li>
-                </ol>
-              </div>
-              <div style={{ background: "#f5f7fa", padding: "16px", borderRadius: "8px", fontSize: "13px", color: "#5c6b73", borderLeft: "4px solid #d85b46" }}>
-                🛡️ <strong>技術的なハイライト (C2C Escrow / State Machine):</strong><br />
-                購入処理を `'paid'`（運営プール） ➔ `'shipped'`（配送中） ➔ `'completed'`（リリース完了）の3フェーズ状態遷移モデルとしてDB構築。クレジットカードの最初の桁（4はVisa、5はMastercard）を動的に検知し、カードフェイスのグラデーションを変更する高度なCSSとセキュア通信ローディングをフロントに搭載。
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-createRoot(document.getElementById("root")!).render(<App />);
