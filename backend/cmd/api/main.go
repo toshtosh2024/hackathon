@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -24,6 +25,16 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 )
+
+func init() {
+	_ = mime.AddExtensionType(".css", "text/css; charset=utf-8")
+	_ = mime.AddExtensionType(".js", "application/javascript; charset=utf-8")
+	_ = mime.AddExtensionType(".svg", "image/svg+xml")
+	_ = mime.AddExtensionType(".png", "image/png")
+	_ = mime.AddExtensionType(".jpg", "image/jpeg")
+	_ = mime.AddExtensionType(".jpeg", "image/jpeg")
+	_ = mime.AddExtensionType(".json", "application/json; charset=utf-8")
+}
 
 type user struct {
 	ID        int64     `json:"id"`

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { ShieldAlert, TrendingUp, Users, Bot, MessageCircle } from "lucide-react";
-import { User, Item } from "./types";
+import { User, Item, getPublicUrl } from "./types";
 
 interface AdminStats {
   summary: {
@@ -287,7 +287,7 @@ function AdminUsersView({ api }: { api: <T>(path: string, options?: RequestInit)
               <tr key={u.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
                 <td style={{ padding: "12px" }}>
                   <img
-                    src={u.avatarUrl || "./placeholder-avatar.svg"}
+                    src={getPublicUrl(u.avatarUrl) || "./placeholder-avatar.svg"}
                     alt={u.name}
                     style={{ width: "40px", height: "40px", borderRadius: "50%", objectFit: "cover" }}
                     onError={(e) => {

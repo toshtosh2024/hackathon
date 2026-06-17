@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 
 // Import modular types and components
-import { User, Item, Conversation, Message, UserReview, ItemScene, Route, NavPage, NavItem, PersonalStats } from "./types";
+import { User, Item, Conversation, Message, UserReview, ItemScene, Route, NavPage, NavItem, PersonalStats, getPublicUrl } from "./types";
 import { StripePaymentModal } from "./StripePaymentModal";
 import { HelpScreen } from "./HelpScreen";
 import { AdminDashboardScreen } from "./AdminDashboardScreen";
@@ -211,7 +211,7 @@ function App() {
           </h1>
           <div className="session-panel">
             <span className="session-role">{user.role === "admin" ? "🛡️ 管理者" : "👤 一般会員"}</span>
-            <img src={user.avatarUrl || "/placeholder-avatar.svg"} alt="" className="session-avatar" />
+            <img src={getPublicUrl(user.avatarUrl) || "/placeholder-avatar.svg"} alt="" className="session-avatar" />
             <span className="session-name">{user.name}</span>
             <button className="ghost-button" onClick={logout}>
               <IconLabel icon={LogOut} label="終了" />
@@ -569,7 +569,7 @@ function HomeScreen({
         <section className="catalog-grid">
           {items.map((item) => (
             <article key={item.id} className="catalog-card" onClick={() => onOpenItem(item.id)}>
-              <img src={item.imageUrl || "/placeholder.svg"} alt="" />
+              <img src={getPublicUrl(item.imageUrl) || "/placeholder.svg"} alt="" />
               <div className="catalog-card-body">
                 <strong>{item.title}</strong>
                 <span>¥{item.price.toLocaleString()}</span>
@@ -1036,7 +1036,7 @@ function ItemDetailScreen({
 
       <section className="detail-layout">
         <article className="panel gallery-panel">
-          <img className="main-item-image" src={currentItem.imageUrl || "/placeholder.svg"} alt="" />
+          <img className="main-item-image" src={getPublicUrl(currentItem.imageUrl) || "/placeholder.svg"} alt="" />
         </article>
 
         <article className="panel detail-panel" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
@@ -1068,7 +1068,7 @@ function ItemDetailScreen({
           <div className="scene-grid">
             <section className="scene-card">
               <p className="eyebrow">Original</p>
-              <img className="scene-image" src={currentItem.imageUrl || "/placeholder.svg"} alt="" />
+              <img className="scene-image" src={getPublicUrl(currentItem.imageUrl) || "/placeholder.svg"} alt="" />
             </section>
             <section className="scene-card">
               <p className="eyebrow">AI Scene & Video</p>
@@ -1078,7 +1078,7 @@ function ItemDetailScreen({
                 videoSimulated ? (
                   <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", borderRadius: "8px" }}>
                     <img
-                      src={scene.imageUrl}
+                      src={getPublicUrl(scene.imageUrl)}
                       alt=""
                       className="scene-image"
                       style={{
@@ -1097,7 +1097,7 @@ function ItemDetailScreen({
                   <video src={videoUrl} autoPlay loop muted playsInline className="scene-image" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} />
                 )
               ) : (
-                <img className="scene-image" src={scene.imageUrl} alt="" style={{ borderRadius: "8px" }} />
+                <img className="scene-image" src={getPublicUrl(scene.imageUrl)} alt="" style={{ borderRadius: "8px" }} />
               )}
             </section>
           </div>
@@ -1332,10 +1332,10 @@ function MessagesScreen({
           </div>
           {selectedConversation && (
             <button className="conversation-item-card" onClick={() => onOpenItem(selectedConversation.itemId)}>
-              <img src={selectedConversation.itemImageUrl || "/placeholder.svg"} alt="" />
+              <img src={getPublicUrl(selectedConversation.itemImageUrl) || "/placeholder.svg"} alt="" />
               <div className="conversation-item-copy">
                 <div className="conversation-counterpart">
-                  <img src={selectedConversation.counterpartAvatarUrl || "/placeholder-avatar.svg"} alt="" />
+                  <img src={getPublicUrl(selectedConversation.counterpartAvatarUrl) || "/placeholder-avatar.svg"} alt="" />
                   <strong>{selectedConversation.counterpartName}</strong>
                 </div>
                 <strong>{selectedConversation.itemTitle}</strong>

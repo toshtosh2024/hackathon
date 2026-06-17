@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { UploadCloud, ShieldAlert, TrendingUp, PackagePlus, Star } from "lucide-react";
-import { User, Item, Conversation, PersonalStats } from "./types";
+import { User, Item, Conversation, PersonalStats, getPublicUrl } from "./types";
 
 interface BarterMemberDetail {
   id: number;
@@ -185,7 +185,7 @@ export function MyPageScreen({
       <section className="panel mypage-panel">
         <div className="profile-panel" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "16px", width: "100%" }}>
-            <img className="profile-avatar" src={user?.avatarUrl || "/placeholder-avatar.svg"} alt="" />
+            <img className="profile-avatar" src={getPublicUrl(user?.avatarUrl) || "/placeholder-avatar.svg"} alt="" />
             <div className="profile-copy">
               <strong>{user?.name ?? "ユーザー"}</strong>
               <small>{user?.email ?? ""}</small>
@@ -235,7 +235,7 @@ export function MyPageScreen({
             <div className="card-grid compact-grid">
               {myItems.map((item) => (
                 <article key={item.id} className="catalog-card compact my-item-card">
-                  <img src={item.imageUrl || "/placeholder.svg"} alt="" />
+                  <img src={getPublicUrl(item.imageUrl) || "/placeholder.svg"} alt="" />
                   <div>
                     <strong>{item.title}</strong>
                     <span>¥{item.price.toLocaleString()}</span>

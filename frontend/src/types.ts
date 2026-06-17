@@ -105,3 +105,11 @@ export interface PersonalStats {
   categoryDistribution: { category: string; itemCount: number; totalRevenue: number }[];
   dailyRevenue: { date: string; amount: number }[];
 }
+
+export function getPublicUrl(url?: string): string {
+  if (!url) return "";
+  if (url.startsWith("gcs://")) {
+    return url.replace("gcs://", "https://storage.googleapis.com/");
+  }
+  return url;
+}
