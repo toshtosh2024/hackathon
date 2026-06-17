@@ -40,8 +40,9 @@ gcloud builds submit --project term9-toshiie-shiomi --config cloudbuild.yaml .
 - Connection: `tosh`
 - Connection region: `us-central1`
 - Provider account: `Tk-visionary`
+- Repository: `utaishi-utoshiie/hackathon`
 
-The provider account must have admin permission on `toshtosh2024/hackathon`. After the repository is linkable from the connection, enable the trigger with:
+The Cloud Build GitHub App installation must have access to `utaishi-utoshiie/hackathon`. If Terraform reports that the repository is not accessible to the GitHub App, update the GitHub App repository access for installation `140825418`, then enable the trigger with:
 
 ```hcl
 enable_github_trigger = true

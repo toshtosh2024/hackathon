@@ -56,7 +56,7 @@ variable "cloud_run_min_instances" {
 variable "github_owner" {
   description = "GitHub repository owner for the Cloud Build trigger."
   type        = string
-  default     = "toshtosh2024"
+  default     = "utaishi-utoshiie"
 }
 
 variable "github_repository" {
