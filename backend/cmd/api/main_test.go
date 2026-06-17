@@ -158,3 +158,20 @@ func TestResolveDSNUsesCloudSQLUnixSocket(t *testing.T) {
 		t.Fatalf("resolveDSN = %q, want %q", got, want)
 	}
 }
+
+func TestParseGCSRef(t *testing.T) {
+	bucket, objectName, err := parseGCSRef("gcs://nextmarket/avatars/user-1.jpg")
+	if err != nil {
+		t.Fatalf("parseGCSRef returned error: %v", err)
+	}
+	if bucket != "nextmarket" || objectName != "avatars/user-1.jpg" {
+		t.Fatalf("unexpected parse result: bucket=%q object=%q", bucket, objectName)
+	}
+}
+
+func TestAssetViewURLKeepsPublicHTTPURL(t *testing.T) {
+	got := assetViewURL("https://storage.googleapis.com/example/items/sample.jpg")
+	if got != "https://storage.googleapis.com/example/items/sample.jpg" {
+		t.Fatalf("assetViewURL changed public URL: %q", got)
+	}
+}

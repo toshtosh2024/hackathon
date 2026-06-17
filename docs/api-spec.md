@@ -117,6 +117,7 @@ Request:
 ```
 
 `purpose` is optional. Use `item` for listing images and `avatar` for profile images. Objects are stored under matching Cloud Storage prefixes.
+Set `visibility` to `private` for non-public uploads such as profile photos.
 
 Response:
 
@@ -124,6 +125,7 @@ Response:
 {
   "uploadUrl": "https://storage.googleapis.com/...",
   "publicUrl": "https://storage.googleapis.com/nextmarket/items/...",
+  "objectPath": "gcs://nextmarket/avatars/...",
   "method": "PUT",
   "contentType": "image/jpeg"
 }
@@ -132,6 +134,18 @@ Response:
 ### GET /items/{id}
 
 Returns one item.
+
+### GET /items/{id}/ai-scene
+
+Authorization: `Bearer <token>`
+
+Returns the latest personalized AI usage-scene image for the current user and item.
+
+### POST /items/{id}/ai-scene
+
+Authorization: `Bearer <token>`
+
+Generates a personalized usage-scene image using the current user's private profile photo and the item image.
 
 ### POST /items/{id}/cancel
 
@@ -213,7 +227,7 @@ Request:
 ```json
 {
   "name": "Toshi",
-  "avatarUrl": "https://storage.googleapis.com/..."
+  "avatarPath": "gcs://nextmarket/avatars/..."
 }
 ```
 

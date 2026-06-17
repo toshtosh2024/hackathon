@@ -129,3 +129,15 @@ CREATE TABLE IF NOT EXISTS user_reviews (
   CONSTRAINT fk_user_reviews_reviewee FOREIGN KEY (reviewee_id) REFERENCES users(id),
   CONSTRAINT chk_user_reviews_rating CHECK (rating BETWEEN 1 AND 5)
 );
+
+CREATE TABLE IF NOT EXISTS item_scene_generations (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  item_id BIGINT NOT NULL,
+  image_path TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_item_scene_generations_user_item_created_at (user_id, item_id, created_at),
+  CONSTRAINT fk_item_scene_generations_user FOREIGN KEY (user_id) REFERENCES users(id),
+  CONSTRAINT fk_item_scene_generations_item FOREIGN KEY (item_id) REFERENCES items(id)
+);

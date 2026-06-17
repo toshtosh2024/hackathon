@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Heart,
   Home,
+  ImagePlus,
   LogIn,
   LogOut,
   MessageCircle,
@@ -47,6 +48,13 @@ type Item = {
   imageUrl: string;
   likeCount: number;
   createdAt: string;
+};
+
+type ItemScene = {
+  imageUrl: string;
+  prompt: string;
+  createdAt: string;
+  isPersonal: boolean;
 };
 
 type Conversation = {
@@ -832,6 +840,9 @@ function ItemDetailScreen({
   const [loadingAI, setLoadingAI] = useState(false);
   const [aiError, setAIError] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [scene, setScene] = useState<ItemScene | null>(null);
+  const [sceneLoading, setSceneLoading] = useState(false);
+  const [sceneError, setSceneError] = useState("");
 
   if (!item) {
     return (
@@ -847,6 +858,22 @@ function ItemDetailScreen({
   }
 
   const currentItem = item;
+
+  useEffect(() => {
+    setScene(null);
+    setSceneError("");
+    if (!user) return;
+    void loadLatestScene();
+  }, [currentItem.id, user?.id]);
+
+  async function loadLatestScene() {
+    try {
+      const data = await api<{ scene: ItemScene | null }>(`/items/${currentItem.id}/ai-scene`);
+      setScene(data.scene);
+    } catch (err) {
+      setSceneError(err instanceof Error ? err.message : "AI画像の読み込みに失敗しました");
+    }
+  }
 
   async function askAI() {
     setLoadingAI(true);
@@ -899,6 +926,19 @@ function ItemDetailScreen({
       onNotice(err instanceof Error ? err.message : "出品の取り下げに失敗しました");
     } finally {
       setCancelling(false);
+    }
+  }
+
+  async function generateScene() {
+    setSceneLoading(true);
+    setSceneError("");
+    try {
+      const data = await api<{ scene: ItemScene }>(`/items/${currentItem.id}/ai-scene`, { method: "POST" });
+      setScene(data.scene);
+    } catch (err) {
+      setSceneError(err instanceof Error ? err.message : "AI画像の生成に失敗しました");
+    } finally {
+      setSceneLoading(false);
     }
   }
 
@@ -957,6 +997,25 @@ function ItemDetailScreen({
         </article>
 
         <article className="panel ai-panel">
+          <div className="panel-heading">
+            <ImagePlus size={20} />
+            <h3>AI使用風景</h3>
+          </div>
+          <div className="scene-grid">
+            <section className="scene-card">
+              <p className="eyebrow">Original</p>
+              <img className="scene-image" src={item.imageUrl || "/placeholder.svg"} alt="" />
+            </section>
+            <section className="scene-card">
+              <p className="eyebrow">AI Scene</p>
+              {scene ? <img className="scene-image" src={scene.imageUrl} alt="" /> : <div className="scene-placeholder">あなた専用の使用イメージを生成できます</div>}
+            </section>
+          </div>
+          <button className="ai-button" disabled={!user || sceneLoading} onClick={() => void generateScene()}>
+            <ImagePlus size={18} />
+            {sceneLoading ? "生成中" : scene ? "AI画像を再生成" : "AI画像を生成"}
+          </button>
+          {sceneError && <p className="error">{sceneError}</p>}
           <div className="panel-heading">
             <Bot size={20} />
             <h3>AIに質問</h3>
@@ -1164,9 +1223,9 @@ function MyPageScreen({
     setUploading(true);
     setProfileError("");
     try {
-      const signed = await api<{ uploadUrl: string; publicUrl: string; contentType: string }>("/upload", {
+      const signed = await api<{ uploadUrl: string; objectPath: string; contentType: string }>("/upload", {
         method: "POST",
-        body: JSON.stringify({ filename: file.name, contentType: file.type, purpose: "avatar" })
+        body: JSON.stringify({ filename: file.name, contentType: file.type, purpose: "avatar", visibility: "private" })
       });
       const response = await fetch(signed.uploadUrl, {
         method: "PUT",
@@ -1178,7 +1237,7 @@ function MyPageScreen({
       }
       const updated = await api<{ user: User; token: string }>("/profile", {
         method: "POST",
-        body: JSON.stringify({ avatarUrl: signed.publicUrl, name: user.name })
+        body: JSON.stringify({ avatarPath: signed.objectPath, name: user.name })
       });
       onSessionUpdated(updated.token, updated.user);
     } catch (err) {

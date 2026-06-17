@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -100,6 +101,13 @@ type conversation struct {
 	UpdatedAt            time.Time `json:"updatedAt"`
 }
 
+type itemScene struct {
+	ImageURL   string    `json:"imageUrl"`
+	Prompt     string    `json:"prompt"`
+	CreatedAt  time.Time `json:"createdAt"`
+	IsPersonal bool      `json:"isPersonal"`
+}
+
 type message struct {
 	ID             int64     `json:"id"`
 	ConversationID int64     `json:"conversationId"`
@@ -125,6 +133,12 @@ type priceSuggestion struct {
 
 type authUserKey struct{}
 
+type imageUpload struct {
+	Filename    string
+	ContentType string
+	Bytes       []byte
+}
+
 func main() {
 	_ = godotenv.Load()
 	a := &app{
@@ -146,6 +160,8 @@ func main() {
 	mux.HandleFunc("GET /api/my/items", a.requireAuth(a.listMyItems))
 	mux.HandleFunc("POST /api/items", a.requireAuth(a.createItem))
 	mux.HandleFunc("POST /api/upload", a.requireAuth(a.createUploadURL))
+	mux.HandleFunc("GET /api/items/{id}/ai-scene", a.requireAuth(a.getLatestItemScene))
+	mux.HandleFunc("POST /api/items/{id}/ai-scene", a.requireAuth(a.generateItemScene))
 	mux.HandleFunc("GET /api/items/{id}", a.getItem)
 	mux.HandleFunc("POST /api/items/{id}/cancel", a.requireAuth(a.cancelItem))
 	mux.HandleFunc("POST /api/items/{id}/like", a.requireAuth(a.toggleLike))
@@ -435,8 +451,9 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 func (a *app) updateProfile(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	var req struct {
-		Name      string `json:"name"`
-		AvatarURL string `json:"avatarUrl"`
+		Name       string `json:"name"`
+		AvatarURL  string `json:"avatarUrl"`
+		AvatarPath string `json:"avatarPath"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -446,8 +463,11 @@ func (a *app) updateProfile(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = u.Name
 	}
-	avatarURL := strings.TrimSpace(req.AvatarURL)
-	if _, err := a.dbHandle().ExecContext(r.Context(), "UPDATE users SET name = ?, avatar_url = ? WHERE id = ?", name, avatarURL, u.ID); err != nil {
+	avatarValue := strings.TrimSpace(req.AvatarPath)
+	if avatarValue == "" {
+		avatarValue = strings.TrimSpace(req.AvatarURL)
+	}
+	if _, err := a.dbHandle().ExecContext(r.Context(), "UPDATE users SET name = ?, avatar_url = ? WHERE id = ?", name, avatarValue, u.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update profile")
 		return
 	}
@@ -570,6 +590,7 @@ func (a *app) createUploadURL(w http.ResponseWriter, r *http.Request) {
 		Filename    string `json:"filename"`
 		ContentType string `json:"contentType"`
 		Purpose     string `json:"purpose"`
+		Visibility  string `json:"visibility"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -582,14 +603,20 @@ func (a *app) createUploadURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := uploadPrefix(req.Purpose)
-	signed, publicURL, err := signedGCSUploadURL(prefix, req.Filename, req.ContentType)
+	privateUpload := strings.EqualFold(strings.TrimSpace(req.Visibility), "private") || strings.EqualFold(strings.TrimSpace(req.Purpose), "avatar")
+	signed, publicURL, objectPath, err := signedGCSUploadURL(prefix, req.Filename, req.ContentType)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
+	viewURL := publicURL
+	if privateUpload {
+		viewURL = ""
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"uploadUrl":   signed,
-		"publicUrl":   publicURL,
+		"publicUrl":   viewURL,
+		"objectPath":  objectPath,
 		"method":      http.MethodPut,
 		"contentType": req.ContentType,
 	})
@@ -702,6 +729,95 @@ func (a *app) cancelItem(w http.ResponseWriter, r *http.Request) {
 
 	it, _ := a.findItem(r.Context(), itemID)
 	writeJSON(w, http.StatusOK, map[string]any{"item": it})
+}
+
+func (a *app) getLatestItemScene(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	itemID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	scene, found, err := a.findLatestItemScene(r.Context(), u.ID, itemID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load generated scene")
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusOK, map[string]any{"scene": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scene": scene})
+}
+
+func (a *app) generateItemScene(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	itemID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	storedUser, rawAvatarRef, err := a.findUserByIDRaw(r.Context(), u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load profile")
+		return
+	}
+	if strings.TrimSpace(rawAvatarRef) == "" {
+		writeError(w, http.StatusBadRequest, "プロフィール写真を先に登録してください")
+		return
+	}
+
+	it, err := a.findItem(r.Context(), itemID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "item not found")
+		return
+	}
+	if strings.TrimSpace(it.ImageURL) == "" {
+		writeError(w, http.StatusBadRequest, "元の商品画像がないためAI画像を生成できません")
+		return
+	}
+
+	avatarBytes, avatarType, err := a.downloadImageAsset(r.Context(), rawAvatarRef)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "プロフィール写真を読み込めませんでした")
+		return
+	}
+	itemBytes, itemType, err := a.downloadImageAsset(r.Context(), it.ImageURL)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "商品画像を読み込めませんでした")
+		return
+	}
+
+	prompt := itemScenePrompt(storedUser.Name, it)
+	generatedBytes, err := a.callOpenAIImageEdit(r.Context(), prompt, []imageUpload{
+		{Filename: "avatar.jpg", ContentType: avatarType, Bytes: avatarBytes},
+		{Filename: "item.jpg", ContentType: itemType, Bytes: itemBytes},
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	objectPath, sceneURL, err := saveGeneratedImageToGCS("generated-scenes", fmt.Sprintf("item-%d-user-%d.jpeg", itemID, u.ID), "image/jpeg", generatedBytes)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "AI画像の保存に失敗しました")
+		return
+	}
+	if _, err := a.dbHandle().ExecContext(r.Context(),
+		"INSERT INTO item_scene_generations (user_id, item_id, image_path, prompt) VALUES (?, ?, ?, ?)",
+		u.ID, itemID, objectPath, prompt,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "generated scene could not be recorded")
+		return
+	}
+
+	a.saveAI(r.Context(), u.ID, &itemID, "item_scene", prompt, objectPath)
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"scene": itemScene{
+			ImageURL:   sceneURL,
+			Prompt:     prompt,
+			CreatedAt:  time.Now().UTC(),
+			IsPersonal: true,
+		},
+	})
 }
 
 func (a *app) toggleLike(w http.ResponseWriter, r *http.Request) {
@@ -919,7 +1035,7 @@ func (a *app) listConversations(w http.ResponseWriter, r *http.Request) {
 		       i.category, c.buyer_id, c.seller_id,
 		       CASE WHEN c.buyer_id = ? THEN c.seller_id ELSE c.buyer_id END AS counterpart_id,
 		       CASE WHEN c.buyer_id = ? THEN seller.name ELSE buyer.name END AS counterpart_name,
-		       CASE WHEN c.buyer_id = ? THEN COALESCE(seller.avatar_url, '') ELSE COALESCE(buyer.avatar_url, '') END AS counterpart_avatar_url,
+		       '' AS counterpart_avatar_url,
 		       c.updated_at
 		FROM conversations c
 		JOIN items i ON i.id = c.item_id
@@ -1170,12 +1286,22 @@ func (a *app) queryReviews(ctx context.Context, condition string, args ...any) (
 }
 
 func (a *app) findUserByID(ctx context.Context, id int64) (user, error) {
+	u, avatarRef, err := a.findUserByIDRaw(ctx, id)
+	if err != nil {
+		return user{}, err
+	}
+	u.AvatarURL = assetViewURL(avatarRef)
+	return u, nil
+}
+
+func (a *app) findUserByIDRaw(ctx context.Context, id int64) (user, string, error) {
 	var u user
+	var avatarRef string
 	err := a.dbHandle().QueryRowContext(ctx,
 		"SELECT id, name, email, role, COALESCE(avatar_url, '') FROM users WHERE id = ?",
 		id,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.AvatarURL)
-	return u, err
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Role, &avatarRef)
+	return u, avatarRef, err
 }
 
 func (a *app) reviewItem(ctx context.Context, title string, description string, category string, condition string) (itemReview, error) {
@@ -1218,6 +1344,71 @@ func (a *app) callOpenAIJSON(ctx context.Context, prompt string, dst any) error 
 		return err
 	}
 	return json.Unmarshal([]byte(extractJSONObject(text)), dst)
+}
+
+func (a *app) callOpenAIImageEdit(ctx context.Context, prompt string, images []imageUpload) ([]byte, error) {
+	if a.openAIKey == "" {
+		return nil, errors.New("OPENAI_API_KEY is not set")
+	}
+	endpoint, err := url.JoinPath(a.openAIBaseURL, "/v1/images/edits")
+	if err != nil {
+		return nil, err
+	}
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("model", "gpt-image-1.5")
+	_ = writer.WriteField("prompt", prompt)
+	_ = writer.WriteField("input_fidelity", "high")
+	_ = writer.WriteField("quality", "high")
+	_ = writer.WriteField("size", "1536x1024")
+	_ = writer.WriteField("output_format", "jpeg")
+	for _, image := range images {
+		part, err := writer.CreateFormFile("image", image.Filename)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := part.Write(image.Bytes); err != nil {
+			return nil, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+a.openAIKey)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("openai image api error: %s", string(respBody))
+	}
+
+	var parsed struct {
+		Data []struct {
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return nil, err
+	}
+	if len(parsed.Data) == 0 || parsed.Data[0].B64JSON == "" {
+		return nil, errors.New("openai returned empty image")
+	}
+	return base64.StdEncoding.DecodeString(parsed.Data[0].B64JSON)
 }
 
 func (a *app) callOpenAIWithFormat(ctx context.Context, prompt string, responseFormat any) (string, error) {
@@ -1293,6 +1484,19 @@ func priceSuggestionPrompt(title string, category string, condition string, note
 カテゴリ: %s
 状態: %s
 メモ: %s`, title, category, condition, notes)
+}
+
+func itemScenePrompt(userName string, it item) string {
+	return fmt.Sprintf(`与えられた2枚の画像を元に、リアルな商品使用シーン写真を1枚だけ生成してください。
+1枚目はユーザー本人の顔写真、2枚目は商品画像です。
+商品そのものの形・素材・色をできる限り維持し、本人が自然にその商品を使っている実写風の写真にしてください。
+不自然な合成感、別人化、過度な美化、漫画風表現は避けてください。
+背景は日常的で自然な場所にしてください。
+商品名: %s
+カテゴリ: %s
+価格: %d円
+説明: %s
+利用者名: %s`, it.Title, it.Category, it.Price, it.Description, userName)
 }
 
 func normalizeRiskLevel(value string, prohibited bool) string {
@@ -1433,7 +1637,20 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 	}
-	return ensureColumn(ctx, db, "users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url TEXT NULL AFTER role")
+	if err := ensureColumn(ctx, db, "users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url TEXT NULL AFTER role"); err != nil {
+		return err
+	}
+	return ensureTable(ctx, db, `CREATE TABLE IF NOT EXISTS item_scene_generations (
+		id BIGINT PRIMARY KEY AUTO_INCREMENT,
+		user_id BIGINT NOT NULL,
+		item_id BIGINT NOT NULL,
+		image_path TEXT NOT NULL,
+		prompt TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		INDEX idx_item_scene_generations_user_item_created_at (user_id, item_id, created_at),
+		CONSTRAINT fk_item_scene_generations_user FOREIGN KEY (user_id) REFERENCES users(id),
+		CONSTRAINT fk_item_scene_generations_item FOREIGN KEY (item_id) REFERENCES items(id)
+	)`)
 }
 
 func ensureColumn(ctx context.Context, db *sql.DB, table string, column string, alterSQL string) error {
@@ -1451,6 +1668,11 @@ func ensureColumn(ctx context.Context, db *sql.DB, table string, column string, 
 		return nil
 	}
 	_, err = db.ExecContext(ctx, alterSQL)
+	return err
+}
+
+func ensureTable(ctx context.Context, db *sql.DB, createSQL string) error {
+	_, err := db.ExecContext(ctx, createSQL)
 	return err
 }
 
@@ -1503,17 +1725,17 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-func signedGCSUploadURL(prefix string, filename string, contentType string) (string, string, error) {
+func signedGCSUploadURL(prefix string, filename string, contentType string) (string, string, string, error) {
 	bucket := strings.TrimSpace(os.Getenv("GCS_BUCKET"))
 	clientEmail := strings.TrimSpace(os.Getenv("GCS_CLIENT_EMAIL"))
 	privateKeyText := strings.TrimSpace(os.Getenv("GCS_PRIVATE_KEY"))
 	if bucket == "" || clientEmail == "" || privateKeyText == "" {
-		return "", "", errors.New("画像アップロード設定が未設定です: GCS_BUCKET, GCS_CLIENT_EMAIL, GCS_PRIVATE_KEY を設定してください")
+		return "", "", "", errors.New("画像アップロード設定が未設定です: GCS_BUCKET, GCS_CLIENT_EMAIL, GCS_PRIVATE_KEY を設定してください")
 	}
 
 	privateKey, err := parseRSAPrivateKey(privateKeyText)
 	if err != nil {
-		return "", "", errors.New("GCS_PRIVATE_KEY を読み込めませんでした")
+		return "", "", "", errors.New("GCS_PRIVATE_KEY を読み込めませんでした")
 	}
 
 	now := time.Now().UTC()
@@ -1550,19 +1772,21 @@ func signedGCSUploadURL(prefix string, filename string, contentType string) (str
 	signHash := sha256.Sum256([]byte(stringToSign))
 	signatureBytes, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, signHash[:])
 	if err != nil {
-		return "", "", errors.New("署名付きURLの発行に失敗しました")
+		return "", "", "", errors.New("署名付きURLの発行に失敗しました")
 	}
 	query.Set("X-Goog-Signature", hex.EncodeToString(signatureBytes))
 
 	publicURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucket, escapeObjectPath(objectName))
 	uploadURL := fmt.Sprintf("https://storage.googleapis.com/%s%s?%s", bucket, escapedObject, query.Encode())
-	return uploadURL, publicURL, nil
+	return uploadURL, publicURL, "gcs://" + bucket + "/" + objectName, nil
 }
 
 func uploadPrefix(purpose string) string {
 	switch strings.ToLower(strings.TrimSpace(purpose)) {
 	case "avatar", "avatars", "profile":
 		return "avatars"
+	case "generated", "scene", "ai-scene":
+		return "generated-scenes"
 	default:
 		return "items"
 	}
@@ -1600,6 +1824,162 @@ func escapeObjectPath(objectName string) string {
 		parts[i] = url.PathEscape(part)
 	}
 	return strings.Join(parts, "/")
+}
+
+func assetViewURL(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
+		return ref
+	}
+	if strings.HasPrefix(ref, "gcs://") {
+		signed, err := signedGCSReadURL(ref, 15*time.Minute)
+		if err == nil {
+			return signed
+		}
+	}
+	return ""
+}
+
+func signedGCSReadURL(ref string, ttl time.Duration) (string, error) {
+	bucket, objectName, err := parseGCSRef(ref)
+	if err != nil {
+		return "", err
+	}
+	clientEmail := strings.TrimSpace(os.Getenv("GCS_CLIENT_EMAIL"))
+	privateKeyText := strings.TrimSpace(os.Getenv("GCS_PRIVATE_KEY"))
+	if clientEmail == "" || privateKeyText == "" {
+		return "", errors.New("missing GCS signing credentials")
+	}
+	privateKey, err := parseRSAPrivateKey(privateKeyText)
+	if err != nil {
+		return "", err
+	}
+
+	now := time.Now().UTC()
+	datestamp := now.Format("20060102")
+	timestamp := now.Format("20060102T150405Z")
+	credentialScope := datestamp + "/auto/storage/goog4_request"
+	credential := clientEmail + "/" + credentialScope
+	escapedObject := "/" + escapeObjectPath(objectName)
+	query := url.Values{}
+	query.Set("X-Goog-Algorithm", "GOOG4-RSA-SHA256")
+	query.Set("X-Goog-Credential", credential)
+	query.Set("X-Goog-Date", timestamp)
+	query.Set("X-Goog-Expires", strconv.Itoa(int(ttl.Seconds())))
+	query.Set("X-Goog-SignedHeaders", "host")
+
+	canonicalRequest := strings.Join([]string{
+		http.MethodGet,
+		escapedObject,
+		query.Encode(),
+		"host:storage.googleapis.com\n",
+		"host",
+		"UNSIGNED-PAYLOAD",
+	}, "\n")
+	canonicalHash := sha256.Sum256([]byte(canonicalRequest))
+	stringToSign := strings.Join([]string{
+		"GOOG4-RSA-SHA256",
+		timestamp,
+		credentialScope,
+		hex.EncodeToString(canonicalHash[:]),
+	}, "\n")
+	signHash := sha256.Sum256([]byte(stringToSign))
+	signatureBytes, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, signHash[:])
+	if err != nil {
+		return "", err
+	}
+	query.Set("X-Goog-Signature", hex.EncodeToString(signatureBytes))
+	return fmt.Sprintf("https://storage.googleapis.com/%s%s?%s", bucket, escapedObject, query.Encode()), nil
+}
+
+func parseGCSRef(ref string) (string, string, error) {
+	if !strings.HasPrefix(ref, "gcs://") {
+		return "", "", errors.New("unsupported gcs ref")
+	}
+	trimmed := strings.TrimPrefix(ref, "gcs://")
+	parts := strings.SplitN(trimmed, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", errors.New("invalid gcs ref")
+	}
+	return parts[0], parts[1], nil
+}
+
+func saveGeneratedImageToGCS(prefix string, filename string, contentType string, data []byte) (string, string, error) {
+	uploadURL, _, objectPath, err := signedGCSUploadURL(prefix, filename, contentType)
+	if err != nil {
+		return "", "", err
+	}
+	req, err := http.NewRequest(http.MethodPut, uploadURL, bytes.NewReader(data))
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Content-Type", contentType)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", "", fmt.Errorf("gcs upload failed: %s", string(body))
+	}
+	return objectPath, assetViewURL(objectPath), nil
+}
+
+func (a *app) findLatestItemScene(ctx context.Context, userID int64, itemID int64) (itemScene, bool, error) {
+	var scene itemScene
+	var imagePath string
+	err := a.dbHandle().QueryRowContext(ctx,
+		"SELECT image_path, prompt, created_at FROM item_scene_generations WHERE user_id = ? AND item_id = ? ORDER BY created_at DESC LIMIT 1",
+		userID, itemID,
+	).Scan(&imagePath, &scene.Prompt, &scene.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return itemScene{}, false, nil
+	}
+	if err != nil {
+		return itemScene{}, false, err
+	}
+	scene.ImageURL = assetViewURL(imagePath)
+	scene.IsPersonal = true
+	return scene, true, nil
+}
+
+func (a *app) downloadImageAsset(ctx context.Context, ref string) ([]byte, string, error) {
+	assetURL := ref
+	if strings.HasPrefix(strings.TrimSpace(ref), "gcs://") {
+		signed, err := signedGCSReadURL(ref, 15*time.Minute)
+		if err != nil {
+			return nil, "", err
+		}
+		assetURL = signed
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("asset download failed with status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+	if semi := strings.Index(contentType, ";"); semi >= 0 {
+		contentType = strings.TrimSpace(contentType[:semi])
+	}
+	return data, contentType, nil
 }
 
 func base64JSON(v any) string {

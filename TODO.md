@@ -31,6 +31,7 @@
 - [x] Stabilize Cloud Run DB startup for login.
 - [x] Add profile avatar upload and DM item summary.
 - [x] Add item cancellation flow.
+- [x] Add private profile photo storage and personalized AI scene generation.
 - [ ] Add basic tests.
 - [x] Add README startup steps.
 - [ ] Prepare demo script.
@@ -83,6 +84,13 @@
 - Added `GET /api/my/items` so My Page can show hidden items after cancellation.
 - Added `POST /api/items/{id}/cancel` to hide active listings owned by the seller.
 - Expanded DM conversation payloads with item summary and counterpart avatar data.
+
+### 2026-06-18 private avatar and AI scene updates
+
+- Changed profile photo uploads to private object storage flow.
+- Added personalized AI usage-scene generation on the item detail page while keeping the original item image visible.
+- Added `item_scene_generations` persistence and API endpoints for per-user generated item scenes.
+- Stopped exposing private profile photos to other users in DM payloads.
 
 ## Remaining Notes
 

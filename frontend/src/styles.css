@@ -763,6 +763,39 @@ form {
   gap: 12px;
 }
 
+.scene-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.scene-card {
+  display: grid;
+  gap: 8px;
+}
+
+.scene-image,
+.scene-placeholder {
+  aspect-ratio: 4 / 5;
+  border-radius: 20px;
+  width: 100%;
+}
+
+.scene-image {
+  object-fit: cover;
+}
+
+.scene-placeholder {
+  align-items: center;
+  background: #f8efe5;
+  border: 1px dashed #d7b8a5;
+  color: #6d645d;
+  display: flex;
+  justify-content: center;
+  padding: 18px;
+  text-align: center;
+}
+
 .ai-answer {
   background: #fff2ec;
   border-left: 4px solid #d85b46;
@@ -955,6 +988,7 @@ form {
   .card-grid,
   .compact-grid,
   .detail-actions,
+  .scene-grid,
   .conversation-item-card,
   .filter-bar,
   .image-preview-row,
