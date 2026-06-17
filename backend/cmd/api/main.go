@@ -68,6 +68,8 @@ type item struct {
 	Price             int       `json:"price"`
 	MinPrice          int       `json:"minPrice"`
 	AIPersonality     string    `json:"aiPersonality"`
+	IsBarter          bool      `json:"isBarter"`
+	WantedCategory    string    `json:"wantedCategory"`
 	Status            string    `json:"status"`
 	ImageURL          string    `json:"imageUrl"`
 	LikeCount         int       `json:"likeCount"`
@@ -184,6 +186,12 @@ func main() {
 
 	// Negotiation Routes
 	mux.HandleFunc("POST /api/items/{id}/negotiate", a.requireAuth(a.negotiateItem))
+
+	// Barter Loop Routes
+	mux.HandleFunc("GET /api/barter/loops", a.requireAuth(a.listBarterLoops))
+	mux.HandleFunc("POST /api/barter/loops/{id}/accept", a.requireAuth(a.acceptBarterLoop))
+	mux.HandleFunc("POST /api/barter/loops/{id}/ship", a.requireAuth(a.shipBarterLoop))
+	mux.HandleFunc("POST /api/barter/loops/{id}/receive", a.requireAuth(a.receiveBarterLoop))
 
 	// Admin Dashboard Routes
 	mux.HandleFunc("GET /api/admin/stats", a.requireAdmin(a.getAdminStats))
@@ -701,13 +709,15 @@ func (a *app) getItem(w http.ResponseWriter, r *http.Request) {
 func (a *app) createItem(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	var req struct {
-		Title         string `json:"title"`
-		Description   string `json:"description"`
-		Category      string `json:"category"`
-		Price         int    `json:"price"`
-		MinPrice      int    `json:"minPrice"`
-		AIPersonality string `json:"aiPersonality"`
-		ImageURL      string `json:"imageUrl"`
+		Title          string `json:"title"`
+		Description    string `json:"description"`
+		Category       string `json:"category"`
+		Price          int    `json:"price"`
+		MinPrice       int    `json:"minPrice"`
+		AIPersonality  string `json:"aiPersonality"`
+		IsBarter       bool   `json:"isBarter"`
+		WantedCategory string `json:"wantedCategory"`
+		ImageURL       string `json:"imageUrl"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -745,8 +755,8 @@ func (a *app) createItem(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	res, err := tx.ExecContext(r.Context(),
-		"INSERT INTO items (seller_id, title, description, category, price, min_price, ai_personality) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		u.ID, req.Title, req.Description, req.Category, req.Price, req.MinPrice, req.AIPersonality,
+		"INSERT INTO items (seller_id, title, description, category, price, min_price, ai_personality, is_barter, wanted_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		u.ID, req.Title, req.Description, req.Category, req.Price, req.MinPrice, req.AIPersonality, req.IsBarter, req.WantedCategory,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create item: "+err.Error())
@@ -1306,13 +1316,13 @@ func (a *app) findItem(ctx context.Context, id int64) (item, error) {
 		SELECT i.id, i.seller_id, u.name,
 		       COALESCE((SELECT AVG(rating) FROM user_reviews WHERE reviewee_id = i.seller_id), 0),
 		       (SELECT COUNT(*) FROM user_reviews WHERE reviewee_id = i.seller_id),
-		       i.title, i.description, i.category, i.price, i.min_price, i.ai_personality, i.status,
+		       i.title, i.description, i.category, i.price, i.min_price, i.ai_personality, i.is_barter, i.wanted_category, i.status,
 		       COALESCE((SELECT image_url FROM item_images WHERE item_id = i.id ORDER BY sort_order LIMIT 1), ''),
 		       (SELECT COUNT(*) FROM likes WHERE item_id = i.id), i.created_at
 		FROM items i
 		JOIN users u ON u.id = i.seller_id
 		WHERE i.id = ?`, id,
-	).Scan(&it.ID, &it.SellerID, &it.SellerName, &it.SellerRatingAvg, &it.SellerReviewCount, &it.Title, &it.Description, &it.Category, &it.Price, &it.MinPrice, &it.AIPersonality, &it.Status, &it.ImageURL, &it.LikeCount, &it.CreatedAt)
+	).Scan(&it.ID, &it.SellerID, &it.SellerName, &it.SellerRatingAvg, &it.SellerReviewCount, &it.Title, &it.Description, &it.Category, &it.Price, &it.MinPrice, &it.AIPersonality, &it.IsBarter, &it.WantedCategory, &it.Status, &it.ImageURL, &it.LikeCount, &it.CreatedAt)
 	return it, err
 }
 
@@ -1774,7 +1784,51 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := ensureIndex(ctx, db, "negotiations", "idx_negotiations_buyer_created_at", "ALTER TABLE negotiations ADD INDEX idx_negotiations_buyer_created_at (buyer_id, created_at)"); err != nil {
 		return err
 	}
-	return ensureIndex(ctx, db, "negotiations", "idx_negotiations_seller_created_at", "ALTER TABLE negotiations ADD INDEX idx_negotiations_seller_created_at (seller_id, created_at)")
+	if err := ensureIndex(ctx, db, "negotiations", "idx_negotiations_seller_created_at", "ALTER TABLE negotiations ADD INDEX idx_negotiations_seller_created_at (seller_id, created_at)"); err != nil {
+		return err
+	}
+
+	// Barter Loop columns and tables
+	if err := ensureColumn(ctx, db, "items", "is_barter", "ALTER TABLE items ADD COLUMN is_barter BOOLEAN NOT NULL DEFAULT FALSE AFTER ai_personality"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "items", "wanted_category", "ALTER TABLE items ADD COLUMN wanted_category VARCHAR(80) NOT NULL DEFAULT '' AFTER is_barter"); err != nil {
+		return err
+	}
+	if err := ensureTable(ctx, db, `CREATE TABLE IF NOT EXISTS barter_loops (
+		id BIGINT PRIMARY KEY AUTO_INCREMENT,
+		status VARCHAR(30) NOT NULL DEFAULT 'proposal',
+		justification TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		return err
+	}
+	if err := ensureTable(ctx, db, `CREATE TABLE IF NOT EXISTS barter_loop_members (
+		id BIGINT PRIMARY KEY AUTO_INCREMENT,
+		loop_id BIGINT NOT NULL,
+		item_id BIGINT NOT NULL,
+		sender_id BIGINT NOT NULL,
+		receiver_id BIGINT NOT NULL,
+		estimated_value INT NOT NULL,
+		cash_adjustment INT NOT NULL,
+		accepted BOOLEAN NOT NULL DEFAULT FALSE,
+		shipping_status VARCHAR(30) NOT NULL DEFAULT 'pending',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		CONSTRAINT fk_loop_members_loop FOREIGN KEY (loop_id) REFERENCES barter_loops(id),
+		CONSTRAINT fk_loop_members_item FOREIGN KEY (item_id) REFERENCES items(id),
+		CONSTRAINT fk_loop_members_sender FOREIGN KEY (sender_id) REFERENCES users(id),
+		CONSTRAINT fk_loop_members_receiver FOREIGN KEY (receiver_id) REFERENCES users(id)
+	)`); err != nil {
+		return err
+	}
+
+	if err := ensureIndex(ctx, db, "barter_loop_members", "idx_loop_members_loop_id", "ALTER TABLE barter_loop_members ADD INDEX idx_loop_members_loop_id (loop_id)"); err != nil {
+		return err
+	}
+	if err := ensureIndex(ctx, db, "barter_loop_members", "idx_loop_members_sender_id", "ALTER TABLE barter_loop_members ADD INDEX idx_loop_members_sender_id (sender_id)"); err != nil {
+		return err
+	}
+	return ensureIndex(ctx, db, "barter_loop_members", "idx_loop_members_receiver_id", "ALTER TABLE barter_loop_members ADD INDEX idx_loop_members_receiver_id (receiver_id)")
 }
 
 func ensureColumn(ctx context.Context, db *sql.DB, table string, column string, alterSQL string) error {
@@ -2890,4 +2944,431 @@ func ensureIndex(ctx context.Context, db *sql.DB, table string, index string, cr
 	}
 	_, err = db.ExecContext(ctx, createSQL)
 	return err
+}
+
+// ==========================================
+// Barter Loop Structs and Handlers
+// ==========================================
+
+type barterNode struct {
+	ItemID         int64
+	SellerID       int64
+	Title          string
+	Category       string
+	Price          int
+	WantedCategory string
+}
+
+type barterOpenAIResponse struct {
+	EstimatedValues map[string]int `json:"estimatedValues"`
+	CashAdjustments map[string]int `json:"cashAdjustments"`
+	Justification   string         `json:"justification"`
+}
+
+type barterMemberDetail struct {
+	ID             int64  `json:"id"`
+	ItemID         int64  `json:"itemId"`
+	ItemTitle      string `json:"itemTitle"`
+	ItemImageURL   string `json:"itemImageUrl"`
+	SenderID       int64  `json:"senderId"`
+	SenderName     string `json:"senderName"`
+	ReceiverID     int64  `json:"receiverId"`
+	ReceiverName   string `json:"receiverName"`
+	EstimatedValue int    `json:"estimatedValue"`
+	CashAdjustment int    `json:"cashAdjustment"`
+	Accepted       bool   `json:"accepted"`
+	ShippingStatus string `json:"shippingStatus"`
+}
+
+type barterLoopDetail struct {
+	ID            int64                `json:"id"`
+	Status        string               `json:"status"`
+	Justification string               `json:"justification"`
+	CreatedAt     time.Time            `json:"createdAt"`
+	Members       []barterMemberDetail `json:"members"`
+}
+
+func (a *app) runBarterMatcher() {
+	// Startup grace sleep (allows database to establish first)
+	time.Sleep(5 * time.Second)
+	log.Println("Barter Matcher: Starting initial database sweep...")
+	a.matchBarterLoops()
+
+	for {
+		// As per instructions, "30分とかでOK"
+		time.Sleep(30 * time.Minute)
+		log.Println("Barter Matcher: Starting periodic 30-minute sweep...")
+		a.matchBarterLoops()
+	}
+}
+
+func (a *app) matchBarterLoops() {
+	ctx := context.Background()
+	db := a.dbHandle()
+	if db == nil {
+		return
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, seller_id, title, category, price, wanted_category
+		FROM items
+		WHERE status = 'active' AND is_barter = TRUE
+		  AND id NOT IN (
+			  SELECT item_id 
+			  FROM barter_loop_members lm 
+			  JOIN barter_loops bl ON lm.loop_id = bl.id 
+			  WHERE bl.status IN ('proposal', 'shipping')
+		  )
+	`)
+	if err != nil {
+		log.Printf("Barter Matcher: failed to fetch nodes: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var nodes []barterNode
+	for rows.Next() {
+		var n barterNode
+		if err := rows.Scan(&n.ItemID, &n.SellerID, &n.Title, &n.Category, &n.Price, &n.WantedCategory); err != nil {
+			log.Printf("Barter Matcher: failed to scan node: %v", err)
+			return
+		}
+		nodes = append(nodes, n)
+	}
+
+	// Optimization: "待ってる人が2人以上いれば回そう"
+	if len(nodes) < 2 {
+		log.Println("Barter Matcher: less than 2 active barter items waiting. Skipping matching cycle.")
+		return
+	}
+
+	cycles := findBarterCycles(nodes)
+	if len(cycles) == 0 {
+		log.Println("Barter Matcher: zero cycle demands detected in current sweep.")
+		return
+	}
+
+	log.Printf("Barter Matcher: found %d closed cycle(s)!", len(cycles))
+
+	for _, cycle := range cycles {
+		a.createBarterLoopProposal(ctx, cycle)
+	}
+}
+
+func findBarterCycles(nodes []barterNode) [][]barterNode {
+	var result [][]barterNode
+	n := len(nodes)
+	matched := make(map[int64]bool)
+
+	var dfs func(path []int, visited map[int64]bool)
+	dfs = func(path []int, visited map[int64]bool) {
+		currIdx := path[len(path)-1]
+		currNode := nodes[currIdx]
+
+		startIdx := path[0]
+		startNode := nodes[startIdx]
+
+		if len(path) >= 2 && currNode.Category == startNode.WantedCategory && currNode.SellerID != startNode.SellerID {
+			canUse := true
+			for _, idx := range path {
+				if matched[nodes[idx].ItemID] {
+					canUse = false
+					break
+				}
+			}
+			if canUse {
+				var cycle []barterNode
+				for _, idx := range path {
+					cycle = append(cycle, nodes[idx])
+					matched[nodes[idx].ItemID] = true
+				}
+				result = append(result, cycle)
+				return
+			}
+		}
+
+		if len(path) >= 3 {
+			return
+		}
+
+		for i := 0; i < n; i++ {
+			next := nodes[i]
+			if currNode.Category == next.WantedCategory && currNode.SellerID != next.SellerID && !visited[next.SellerID] {
+				visited[next.SellerID] = true
+				dfs(append(path, i), visited)
+				delete(visited, next.SellerID)
+			}
+		}
+	}
+
+	for i := 0; i < n; i++ {
+		if matched[nodes[i].ItemID] {
+			continue
+		}
+		visited := make(map[int64]bool)
+		visited[nodes[i].SellerID] = true
+		dfs([]int{i}, visited)
+	}
+
+	return result
+}
+
+func (a *app) createBarterLoopProposal(ctx context.Context, cycle []barterNode) {
+	var itemsDesc []string
+	for i, n := range cycle {
+		receiverIdx := (i - 1 + len(cycle)) % len(cycle)
+		itemsDesc = append(itemsDesc, fmt.Sprintf(
+			"商品%d: %q (価格: %d円, カテゴリ: %q) - 出品者(User %d)から受取人(User %d)へ送られます。",
+			i+1, n.Title, n.Price, n.Category, i+1, receiverIdx+1,
+		))
+	}
+
+	prompt := fmt.Sprintf(`あなたは物々交換取引プラットフォームの公平な財務査定AIエージェントです。
+以下の%d者間物々交換サイクル（わらしべ長者ループ）が検出されました：
+%s
+
+各商品の市場価値やカテゴリー、状態を考慮して「妥当な物々交換査定価値（estimatedValues）」を推定し、取引が100%%公平になるように各ユーザーの「現金精算差額（cashAdjustments）」を算出して均衡をとってください。
+
+【差額精算（cashAdjustments）の絶対ルール】：
+1. ユーザーの純利益は以下の計算式に従います：
+   純利益 = （受け取る商品の査定価値） + （現金精算差額） - （放出する商品の査定価値）
+2. 全員の純利益が完全に「0」になるように現金精算差額を計算してください。
+   ・例えば、User 1が「査定価値3500円」の商品を受け取り、「査定価値4000円」の商品を放出する場合、
+     User 1は 500円分損をしているため、現金精算差額（cashAdjustments）は「+500（500円受け取り）」となります。
+3. プラットフォーム全体のバランスを保つため、全員の現金精算差額（cashAdjustments）の合計値は必ず「ちょうど0」にしてください！
+   ・例：User 1: +500, User 2: +1500, User 3: -2000 ➔ 合計: 0円。
+
+必ず以下のJSONフォーマットのみで出力してください。商品のキーは "item1", "item2", "item3"、ユーザーのキーは "user1", "user2", "user3" としてください。
+{"estimatedValues": {"item1": 査定額, "item2": 査定額, ...}, "cashAdjustments": {"user1": 差額, "user2": 差額, ...}, "justification": "日本での査定評価と差額の算出理由"}`,
+		len(cycle), strings.Join(itemsDesc, "\n"),
+	)
+
+	var res barterOpenAIResponse
+	err := a.callOpenAIJSON(ctx, prompt, &res)
+	if err != nil {
+		log.Printf("Barter Matcher: OpenAI balancing failed: %v", err)
+		return
+	}
+
+	tx, err := a.dbHandle().BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("Barter Matcher: failed to start transaction: %v", err)
+		return
+	}
+	defer tx.Rollback()
+
+	pRes, err := tx.ExecContext(ctx, "INSERT INTO barter_loops (status, justification) VALUES ('proposal', ?)", res.Justification)
+	if err != nil {
+		log.Printf("Barter Matcher: failed to insert barter_loop: %v", err)
+		return
+	}
+	loopID, _ := pRes.LastInsertId()
+
+	for i, n := range cycle {
+		itemKey := fmt.Sprintf("item%d", i+1)
+		userKey := fmt.Sprintf("user%d", i+1)
+
+		estVal := res.EstimatedValues[itemKey]
+		if estVal <= 0 {
+			estVal = n.Price
+		}
+		cashAdj := res.CashAdjustments[userKey]
+
+		receiverIdx := (i - 1 + len(cycle)) % len(cycle)
+		receiverID := cycle[receiverIdx].SellerID
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO barter_loop_members 
+			(loop_id, item_id, sender_id, receiver_id, estimated_value, cash_adjustment, accepted, shipping_status) 
+			VALUES (?, ?, ?, ?, ?, ?, FALSE, 'pending')`,
+			loopID, n.ItemID, n.SellerID, receiverID, estVal, cashAdj,
+		)
+		if err != nil {
+			log.Printf("Barter Matcher: failed to insert member: %v", err)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("Barter Matcher: failed to commit barter loop: %v", err)
+		return
+	}
+
+	log.Printf("Barter Matcher: successfully created barter loop proposal #%d with %d members!", loopID, len(cycle))
+}
+
+func (a *app) listBarterLoops(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	db := a.dbHandle()
+	if db == nil {
+		writeError(w, http.StatusServiceUnavailable, "database unavailable")
+		return
+	}
+
+	rows, err := db.QueryContext(r.Context(), `
+		SELECT DISTINCT loop_id 
+		FROM barter_loop_members 
+		WHERE sender_id = ? OR receiver_id = ?`, u.ID, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query barter loops: "+err.Error())
+		return
+	}
+	defer rows.Close()
+
+	var loopIDs []int64
+	for rows.Next() {
+		var id int64
+		_ = rows.Scan(&id)
+		loopIDs = append(loopIDs, id)
+	}
+
+	loops := []barterLoopDetail{}
+	for _, lid := range loopIDs {
+		var bl barterLoopDetail
+		err := db.QueryRowContext(r.Context(), "SELECT id, status, justification, created_at FROM barter_loops WHERE id = ?", lid).Scan(&bl.ID, &bl.Status, &bl.Justification, &bl.CreatedAt)
+		if err != nil {
+			continue
+		}
+
+		mRows, err := db.QueryContext(r.Context(), `
+			SELECT lm.id, lm.item_id, i.title, 
+			       COALESCE((SELECT image_url FROM item_images WHERE item_id = i.id ORDER BY sort_order LIMIT 1), ''),
+			       lm.sender_id, s.name, lm.receiver_id, r.name, lm.estimated_value, lm.cash_adjustment, lm.accepted, lm.shipping_status
+			  FROM barter_loop_members lm
+			  JOIN items i ON i.id = lm.item_id
+			  JOIN users s ON s.id = lm.sender_id
+			  JOIN users r ON r.id = lm.receiver_id
+			  WHERE lm.loop_id = ?`, lid)
+		if err != nil {
+			continue
+		}
+
+		bl.Members = []barterMemberDetail{}
+		for mRows.Next() {
+			var m barterMemberDetail
+			err := mRows.Scan(&m.ID, &m.ItemID, &m.ItemTitle, &m.ItemImageURL, &m.SenderID, &m.SenderName, &m.ReceiverID, &m.ReceiverName, &m.EstimatedValue, &m.CashAdjustment, &m.Accepted, &m.ShippingStatus)
+			if err != nil {
+				continue
+			}
+			bl.Members = append(bl.Members, m)
+		}
+		mRows.Close()
+		loops = append(loops, bl)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"loops": loops})
+}
+
+func (a *app) acceptBarterLoop(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	loopID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	db := a.dbHandle()
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(r.Context(), "UPDATE barter_loop_members SET accepted = TRUE WHERE loop_id = ? AND sender_id = ?", loopID, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to accept loop: "+err.Error())
+		return
+	}
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		writeError(w, http.StatusNotFound, "matching loop leg not found for this user")
+		return
+	}
+
+	var unacceptedCount int
+	err = tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM barter_loop_members WHERE loop_id = ? AND accepted = FALSE", loopID).Scan(&unacceptedCount)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check acceptance states")
+		return
+	}
+
+	if unacceptedCount == 0 {
+		_, err = tx.ExecContext(r.Context(), "UPDATE barter_loops SET status = 'shipping' WHERE id = ?", loopID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update loop status to shipping")
+			return
+		}
+		_, err = tx.ExecContext(r.Context(), "UPDATE items SET status = 'sold' WHERE id IN (SELECT item_id FROM barter_loop_members WHERE loop_id = ?)", loopID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to freeze item statuses")
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit transaction")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (a *app) shipBarterLoop(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	loopID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	_, err := a.dbHandle().ExecContext(r.Context(), "UPDATE barter_loop_members SET shipping_status = 'shipped' WHERE loop_id = ? AND sender_id = ?", loopID, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark as shipped: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (a *app) receiveBarterLoop(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	loopID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	db := a.dbHandle()
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(r.Context(), "UPDATE barter_loop_members SET shipping_status = 'received' WHERE loop_id = ? AND receiver_id = ?", loopID, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark as received: "+err.Error())
+		return
+	}
+
+	var unreceivedCount int
+	err = tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM barter_loop_members WHERE loop_id = ? AND shipping_status != 'received'", loopID).Scan(&unreceivedCount)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check shipping states")
+		return
+	}
+
+	if unreceivedCount == 0 {
+		_, err = tx.ExecContext(r.Context(), "UPDATE barter_loops SET status = 'completed' WHERE id = ?", loopID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to complete loop")
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit transaction")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }

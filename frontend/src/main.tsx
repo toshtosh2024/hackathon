@@ -48,6 +48,8 @@ type Item = {
   price: number;
   minPrice?: number;
   aiPersonality?: string;
+  isBarter?: boolean;
+  wantedCategory?: string;
   status: "active" | "sold" | "hidden";
   imageUrl: string;
   likeCount: number;
@@ -651,6 +653,8 @@ function CreateItemScreen({
   const [price, setPrice] = useState(4800);
   const [minPrice, setMinPrice] = useState(3000);
   const [aiPersonality, setAiPersonality] = useState("osaka");
+  const [isBarter, setIsBarter] = useState(false);
+  const [wantedCategory, setWantedCategory] = useState("fashion");
   const [imageUrl, setImageUrl] = useState("https://images.unsplash.com/photo-1594223274512-ad4803739b7c?auto=format&fit=crop&w=900&q=80");
   const [loadingAI, setLoadingAI] = useState(false);
   const [loadingPrice, setLoadingPrice] = useState(false);
@@ -730,7 +734,7 @@ function CreateItemScreen({
     try {
       const data = await api<{ item: Item }>("/items", {
         method: "POST",
-        body: JSON.stringify({ title, category, description, price, minPrice, aiPersonality, imageUrl })
+        body: JSON.stringify({ title, category, description, price, minPrice, aiPersonality, isBarter, wantedCategory, imageUrl })
       });
       onCreated(data.item);
     } catch (err) {
@@ -832,6 +836,25 @@ function CreateItemScreen({
               </select>
             </div>
           </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", margin: "16px 0", background: "#fffdf9", border: "1px solid #eadfd3", padding: "16px", borderRadius: "8px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#1f2933" }}>
+              <input type="checkbox" checked={isBarter} onChange={(e) => setIsBarter(e.target.checked)} style={{ width: "18px", height: "18px" }} />
+              🔄 この商品を「物々交換（Barter Loop）」の対象にする
+            </label>
+            {isBarter && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "8px" }}>
+                <small style={{ color: "#7d8b99", fontWeight: 700 }}>物々交換で最も希望するカテゴリー（ジャンル）</small>
+                <select value={wantedCategory} onChange={(e) => setWantedCategory(e.target.value)} className="admin-role-select w-full" style={{ padding: "10px 14px", borderRadius: "8px", border: "1px solid #eadfd3", background: "#ffffff", height: "46px" }}>
+                  {CATEGORIES.map((cat) => (
+                    <option key={cat.value} value={cat.value}>{cat.label}</option>
+                  ))}
+                </select>
+                <small style={{ color: "#7d8b99" }}>※他ユーザーが出品したこのカテゴリーの商品と、AI自動交渉（わらしべ長者ループ）で等価交換マッチングを行います。</small>
+              </div>
+            )}
+          </div>
+
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="AIに渡すメモ" />
           <div className="tool-row">
             <button className="ai-button" disabled={loadingAI} type="button" onClick={generateDescription}>
@@ -1446,6 +1469,29 @@ interface PersonalStats {
   dailyRevenue: { date: string; txCount: number; revenue: number }[];
 }
 
+interface BarterMemberDetail {
+  id: number;
+  itemId: number;
+  itemTitle: string;
+  itemImageUrl: string;
+  senderId: number;
+  senderName: string;
+  receiverId: number;
+  receiverName: string;
+  estimatedValue: number;
+  cashAdjustment: number;
+  accepted: boolean;
+  shippingStatus: "pending" | "shipped" | "received";
+}
+
+interface BarterLoopDetail {
+  id: number;
+  status: "proposal" | "shipping" | "completed" | "cancelled";
+  justification: string;
+  createdAt: string;
+  members: BarterMemberDetail[];
+}
+
 function MyPageScreen({
   user,
   myItems,
@@ -1466,10 +1512,28 @@ function MyPageScreen({
   const [uploading, setUploading] = useState(false);
   const [profileError, setProfileError] = useState("");
 
-  const [activeTab, setActiveTab] = useState<"listings" | "dashboard">("listings");
+  const [activeTab, setActiveTab] = useState<"listings" | "dashboard" | "barter">("listings");
   const [stats, setStats] = useState<PersonalStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState("");
+
+  // Barter Loop States
+  const [barterLoops, setBarterLoops] = useState<BarterLoopDetail[]>([]);
+  const [barterLoading, setBarterLoading] = useState(false);
+  const [barterError, setBarterError] = useState("");
+
+  const loadBarterLoops = () => {
+    setBarterLoading(true);
+    setBarterError("");
+    api<{ loops: BarterLoopDetail[] }>("/barter/loops")
+      .then((data) => {
+        setBarterLoops(data.loops || []);
+      })
+      .catch((err) => {
+        setBarterError(err instanceof Error ? err.message : "物々交換提案のロードに失敗しました");
+      })
+      .finally(() => setBarterLoading(false));
+  };
 
   useEffect(() => {
     if (activeTab === "dashboard" && !stats) {
@@ -1486,6 +1550,39 @@ function MyPageScreen({
         .finally(() => setStatsLoading(false));
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "barter") {
+      loadBarterLoops();
+    }
+  }, [activeTab]);
+
+  const acceptBarter = async (loopId: number) => {
+    try {
+      await api(`/barter/loops/${loopId}/accept`, { method: "POST" });
+      loadBarterLoops();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "提案の承認に失敗しました");
+    }
+  };
+
+  const shipBarter = async (loopId: number) => {
+    try {
+      await api(`/barter/loops/${loopId}/ship`, { method: "POST" });
+      loadBarterLoops();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "発送通知に失敗しました");
+    }
+  };
+
+  const receiveBarter = async (loopId: number) => {
+    try {
+      await api(`/barter/loops/${loopId}/receive`, { method: "POST" });
+      loadBarterLoops();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "受取報告に失敗しました");
+    }
+  }
 
   async function uploadAvatar(file: File | null) {
     if (!file || !user) return;
@@ -1561,7 +1658,7 @@ function MyPageScreen({
         {profileError && <p className="error">{profileError}</p>}
 
         {/* Tab Controls */}
-        <div style={{ display: "flex", borderBottom: "2px solid #eadfd3", gap: "16px", margin: "24px 0 16px 0" }}>
+        <div style={{ display: "flex", borderBottom: "2px solid #eadfd3", gap: "16px", margin: "24px 0 16px 0", flexWrap: "wrap" }}>
           <button
             className={`tab-link ${activeTab === "listings" ? "active" : ""}`}
             onClick={() => setActiveTab("listings")}
@@ -1576,9 +1673,16 @@ function MyPageScreen({
           >
             <TrendingUp size={16} style={{ marginRight: "4px", verticalAlign: "middle" }} /> マイ・ダッシュボード (個人分析)
           </button>
+          <button
+            className={`tab-link ${activeTab === "barter" ? "active" : ""}`}
+            onClick={() => setActiveTab("barter")}
+            style={{ background: "none", border: "none", padding: "10px 16px", fontWeight: 600, fontSize: "15px", color: activeTab === "barter" ? "#d85b46" : "#5c6b73", borderBottom: activeTab === "barter" ? "3px solid #d85b46" : "3px solid transparent", cursor: "pointer" }}
+          >
+            🔄 AIわらしべ物々交換 ({barterLoops.length})
+          </button>
         </div>
 
-        {activeTab === "listings" ? (
+        {activeTab === "listings" && (
           <>
             <div className="section-head">
               <div>
@@ -1610,7 +1714,9 @@ function MyPageScreen({
               {myItems.length === 0 && <p className="muted">まだ出品がありません。最初の1品を登録しましょう。</p>}
             </div>
           </>
-        ) : (
+        )}
+
+        {activeTab === "dashboard" && (
           <div className="personal-dashboard">
             {statsLoading ? (
               <div className="loading-state">分析データを集計中...</div>
@@ -1694,6 +1800,156 @@ function MyPageScreen({
                   </div>
                 </div>
               </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "barter" && (
+          <div className="barter-dashboard" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+            {barterLoading ? (
+              <div className="loading-state">物々交換提案を検索中...</div>
+            ) : barterError ? (
+              <p className="error">{barterError}</p>
+            ) : barterLoops.length === 0 ? (
+              <div className="empty-state" style={{ background: "#fffdf9", border: "1px solid #eadfd3", borderRadius: "12px", padding: "32px", textAlign: "center" }}>
+                <div style={{ fontSize: "32px", marginBottom: "12px" }}>🔄 🤖 🔄</div>
+                <h3 style={{ color: "#1f2933" }}>AIが物々交換ルートを探索しています</h3>
+                <p style={{ color: "#5c6b73", fontSize: "14px", margin: "8px 0 16px 0", lineHeight: "1.5" }}>
+                  現在、あなたを含む「物々交換ルート」をAIが自動探索しています。<br />
+                  出品フォームで「物々交換を許可」した商品を出品して、しばらくお待ちください。<br />
+                  （※待機中のユーザーが2人以上集まると、AIが自動的に物々交換の循環ループをマッチングしてここに表示します）
+                </p>
+                <button className="primary-button" onClick={onOpenSell} style={{ margin: "0 auto" }}>
+                  <PackagePlus size={18} /> 物々交換対象で商品を出品する
+                </button>
+              </div>
+            ) : (
+              barterLoops.map((loop) => {
+                const myLeg = loop.members.find((m) => m.senderId === user?.id || m.receiverId === user?.id);
+                if (!myLeg) return null;
+
+                const isSender = myLeg.senderId === user?.id;
+                const otherLegs = loop.members.filter((m) => m.id !== myLeg.id);
+
+                return (
+                  <div key={loop.id} style={{ background: "#ffffff", border: "2px solid #eadfd3", borderRadius: "12px", padding: "24px", display: "flex", flexDirection: "column", gap: "20px", boxShadow: "0 2px 6px rgba(0,0,0,0.05)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eadfd3", paddingBottom: "12px", flexWrap: "wrap", gap: "12px" }}>
+                      <div>
+                        <span style={{ background: loop.status === "completed" ? "#e1f8eb" : loop.status === "shipping" ? "#e3f3ff" : "#fffdf9", color: loop.status === "completed" ? "#1b8a5a" : loop.status === "shipping" ? "#0070f3" : "#5c6b73", padding: "4px 10px", borderRadius: "12px", fontSize: "12px", fontWeight: 700, textTransform: "uppercase" }}>
+                          {loop.status === "proposal" ? "提案中 (要全員承認)" : loop.status === "shipping" ? "📦 発送・取引進行中" : loop.status === "completed" ? "🎉 取引成立・完了" : "キャンセル"}
+                        </span>
+                        <strong style={{ marginLeft: "8px", fontSize: "15px" }}>AI物々交換ループ #{loop.id}</strong>
+                      </div>
+                      <small style={{ color: "#7d8b99" }}>提案日時: {new Date(loop.createdAt).toLocaleString()}</small>
+                    </div>
+
+                    <div style={{ background: "#fffdf9", borderRadius: "8px", padding: "16px", border: "1px solid #eadfd3" }}>
+                      <strong style={{ fontSize: "13px", color: "#7d8b99", display: "block", marginBottom: "12px" }}>🔄 交換サイクル・相関関係</strong>
+                      
+                      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        {loop.members.map((m, idx) => {
+                          const isMeSender = m.senderId === user?.id;
+                          const isMeReceiver = m.receiverId === user?.id;
+
+                          return (
+                            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px", background: isMeSender || isMeReceiver ? "#ffefe9" : "#ffffff", border: isMeSender || isMeReceiver ? "1px solid #ffccb8" : "1px solid #eadfd3", borderRadius: "8px", flexWrap: "wrap" }}>
+                              <img src={m.itemImageUrl || "/placeholder.svg"} alt="" style={{ width: "48px", height: "48px", borderRadius: "6px", objectFit: "cover", border: "1px solid #eadfd3" }} />
+                              <div style={{ flex: 1, minWidth: "150px" }}>
+                                <div style={{ fontSize: "11px", color: "#7d8b99", fontWeight: 600 }}>商品提供レッグ {idx + 1}</div>
+                                <strong style={{ fontSize: "14px", color: "#1f2933" }}>{m.itemTitle}</strong>
+                                <div style={{ fontSize: "12px", color: "#5c6b73", marginTop: "2px" }}>
+                                  送り手: <strong>{m.senderName} {isMeSender && "(あなた)"}</strong> ➔ 受け手: <strong>{m.receiverName} {isMeReceiver && "(あなた)"}</strong>
+                                </div>
+                              </div>
+                              <div style={{ textAlign: "right", minWidth: "120px" }}>
+                                <div style={{ fontSize: "13px", fontWeight: 700 }}>AI査定価値: ¥{m.estimatedValue.toLocaleString()}</div>
+                                <div style={{ fontSize: "12px", color: m.cashAdjustment > 0 ? "#1b8a5a" : m.cashAdjustment < 0 ? "#9d372c" : "#5c6b73", fontWeight: 600, marginTop: "2px" }}>
+                                  {m.cashAdjustment > 0 ? `差額受取: +¥${m.cashAdjustment.toLocaleString()}` : m.cashAdjustment < 0 ? `差額支払: -¥${Math.abs(m.cashAdjustment).toLocaleString()}` : "差額清算なし"}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: "13px", color: "#5c6b73", background: "#f5f7fa", padding: "14px 16px", borderRadius: "8px", lineHeight: "1.5" }}>
+                      💡 <strong>AIによる査定調停理由:</strong><br />
+                      {loop.justification}
+                    </div>
+
+                    {loop.status === "proposal" ? (
+                      <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+                        <div style={{ flex: 1, minWidth: "200px" }}>
+                          <div style={{ fontSize: "13px", fontWeight: 600 }}>あなたの現在の承認状況:</div>
+                          <div style={{ fontSize: "14px", color: myLeg.accepted ? "#1b8a5a" : "#9d6f1a", fontWeight: 700, marginTop: "2px" }}>
+                            {myLeg.accepted ? "✅ 承認済み（他メンバーの承認を待っています）" : "⏳ 未承認（下のボタンから承認してください）"}
+                          </div>
+                        </div>
+                        {!myLeg.accepted && (
+                          <button className="primary-button" onClick={() => void acceptBarter(loop.id)} style={{ background: "#d85b46", color: "#ffffff" }}>
+                            <Bot size={16} /> この物々交換提案を承認する
+                          </button>
+                        )}
+                      </div>
+                    ) : loop.status === "shipping" ? (
+                      <div style={{ borderTop: "1px solid #eadfd3", paddingTop: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
+                        <div>
+                          <strong style={{ fontSize: "14px" }}>📦 物々交換発送管理ステータス</strong>
+                          <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#7d8b99" }}>メンバー全員が発送し、全員が受取報告をすると取引完了になります。</p>
+                        </div>
+
+                        <div style={{ display: "grid", gap: "12px", gridTemplateColumns: "1fr 1fr" }}>
+                          <div style={{ border: "1px solid #eadfd3", borderRadius: "8px", padding: "14px", background: "#fffdf9" }}>
+                            <strong style={{ fontSize: "13px", color: "#d85b46" }}>📤 あなたの発送タスク</strong>
+                            <p style={{ margin: "4px 0 8px 0", fontSize: "12px" }}>
+                              商品「<strong>{myLeg.itemTitle}</strong>」を <strong>{myLeg.receiverName} さん</strong> 宛に発送してください。
+                            </p>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{ fontSize: "13px", fontWeight: 700, color: myLeg.shippingStatus !== "pending" ? "#1b8a5a" : "#9d6f1a" }}>
+                                状態: {myLeg.shippingStatus === "pending" ? "未発送 ⏳" : "発送完了 ✅"}
+                              </span>
+                              {myLeg.shippingStatus === "pending" && (
+                                <button className="ghost-button" onClick={() => void shipBarter(loop.id)} style={{ marginLeft: "auto", background: "#ffffff", borderColor: "#d85b46", color: "#d85b46" }}>
+                                  発送完了を報告
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {(() => {
+                            const recLeg = loop.members.find((m) => m.receiverId === user?.id);
+                            if (!recLeg) return null;
+                            return (
+                              <div style={{ border: "1px solid #eadfd3", borderRadius: "8px", padding: "14px", background: "#fffdf9" }}>
+                                <strong style={{ fontSize: "13px", color: "#0070f3" }}>📥 あなたの受取確認タスク</strong>
+                                <p style={{ margin: "4px 0 8px 0", fontSize: "12px" }}>
+                                  <strong>{recLeg.senderName} さん</strong> から商品「<strong>{recLeg.itemTitle}</strong>」が届きます。<br />
+                                  差額調整額: <strong>{recLeg.cashAdjustment > 0 ? `+¥${recLeg.cashAdjustment.toLocaleString()} 受取` : `¥${Math.abs(recLeg.cashAdjustment).toLocaleString()} 支払`}</strong>
+                                </p>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                  <span style={{ fontSize: "13px", fontWeight: 700, color: recLeg.shippingStatus === "received" ? "#1b8a5a" : "#9d6f1a" }}>
+                                    状態: {recLeg.shippingStatus === "received" ? "受取・取引完了 ✅" : recLeg.shippingStatus === "shipped" ? "相手が発送済み 📦" : "相手の発送待ち ⏳"}
+                                  </span>
+                                  {recLeg.shippingStatus === "shipped" && (
+                                    <button className="ghost-button" onClick={() => void receiveBarter(loop.id)} style={{ marginLeft: "auto", background: "#ffffff", borderColor: "#0070f3", color: "#0070f3" }}>
+                                      商品を受け取りました
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ background: "#e1f8eb", borderRadius: "8px", padding: "12px", textAlign: "center", fontSize: "14px", color: "#1b8a5a", fontWeight: 700 }}>
+                        🎉 この物々交換取引は完全に終了しました。おめでとうございます！
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         )}
