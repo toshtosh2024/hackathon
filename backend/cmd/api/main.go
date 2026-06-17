@@ -1160,6 +1160,23 @@ func (a *app) listMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	u := currentUser(r)
+	var buyerID, sellerID int64
+	err := a.dbHandle().QueryRowContext(r.Context(), "SELECT buyer_id, seller_id FROM conversations WHERE id = ?", conversationID).Scan(&buyerID, &sellerID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "conversation not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to check conversation context")
+		}
+		return
+	}
+	if buyerID != u.ID && sellerID != u.ID {
+		writeError(w, http.StatusForbidden, "you are not a participant in this conversation")
+		return
+	}
+
 	rows, err := a.dbHandle().QueryContext(r.Context(),
 		"SELECT id, conversation_id, sender_id, body, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",
 		conversationID,
@@ -1196,6 +1213,21 @@ func (a *app) createMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Body) == "" {
 		writeError(w, http.StatusBadRequest, "body is required")
+		return
+	}
+
+	var buyerID, sellerID int64
+	err := a.dbHandle().QueryRowContext(r.Context(), "SELECT buyer_id, seller_id FROM conversations WHERE id = ?", conversationID).Scan(&buyerID, &sellerID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "conversation not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to check conversation context")
+		}
+		return
+	}
+	if buyerID != u.ID && sellerID != u.ID {
+		writeError(w, http.StatusForbidden, "you are not a participant in this conversation")
 		return
 	}
 
