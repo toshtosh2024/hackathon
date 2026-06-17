@@ -1117,7 +1117,7 @@ func (a *app) listConversations(w http.ResponseWriter, r *http.Request) {
 		JOIN users buyer ON buyer.id = c.buyer_id
 		JOIN users seller ON seller.id = c.seller_id
 		WHERE c.buyer_id = ? OR c.seller_id = ?
-		ORDER BY c.updated_at DESC`, u.ID, u.ID, u.ID, u.ID, u.ID)
+		ORDER BY c.updated_at DESC`, u.ID, u.ID, u.ID, u.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load conversations")
 		return
