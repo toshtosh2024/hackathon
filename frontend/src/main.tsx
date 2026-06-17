@@ -2945,21 +2945,22 @@ function HelpScreen({ onOpenSell }: { onOpenSell: () => void }) {
 
           {tab === "dashboard" && (
             <>
-              <h3 style={{ margin: 0, color: "#d85b46" }}>📊 ダブル・分析ダッシュボード (データビジュアライズ)</h3>
+              <h3 style={{ margin: 0, color: "#d85b46" }}>📊 分析ダッシュボード ＆ 💳 Stripeエスクロー決済・物流シミュレーション</h3>
               <p style={{ margin: 0, fontSize: "14px", color: "#5c6b73", lineHeight: "1.6" }}>
-                一般ユーザー全員が自分自身の取引・出品・売上を分析できる「マイ・ダッシュボード」と、管理者（admin）がプラットフォームを総合監視する「管理者画面」の二重構造。
+                個人売上高やカテゴリ比率、プラットフォームKPIを一元管理する「ダブル・ダッシュボード」に加え、商用運用に不可欠な「Stripe決済 ＆ 取引ナビ・物流エスクロー保護システム」を完全再現しています。
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: "12px", borderTop: "1px solid #eadfd3", paddingTop: "16px" }}>
                 <strong>🚀 使い方・体験ステップ:</strong>
                 <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "14px", color: "#1f2933", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <li>マイページから「マイ・ダッシュボード（個人分析）」タブをタップすると、個人の総売上高、販売件数、いいね総数、カテゴリー割合、日別売上推移が視覚的なグラフで表示されます。</li>
-                  <li>管理者ロール（admin）を持つアカウントの場合、マイページに特別な<strong>「システム管理者ダッシュボードを開く」</strong>ボタンが統合表示されます。</li>
-                  <li>管理者画面では、サービス全体の総売上・総ユーザーKPI、AIによる不適切コンテンツ審査（モデレーション検知ログ・リスク評価・理由）、および登録ユーザー一覧と一般/管理者権限の相互即時切替が可能です。</li>
+                  <li>商品を購入する際、実運用のStripe checkoutを模したクレジットカード決済モーダルが表示されます。ダミー情報を入力し「決済を実行」すると、代金は安全にプラットフォーム（エスクロープール）へ一時保管されます。</li>
+                  <li>買い手・売り手双方向のDM（チャット）を開くと、最上部に「Stripe エスクロー取引ナビ」が自動出現！</li>
+                  <li>売り手が「商品を発送したことを通知する」、買い手が荷物を確認後に「商品を受け取ったので取引を完了する」をタップすると、エスクロー保護が自動解除され、売上が出品者の「引き出し可能残高」へ確定反映されます。</li>
+                  <li>マイページのマイ・ダッシュボードでは、「確定売上高」と「現在エスクロー預かり中の資金」を統合ウォレットとして動的に監視でき、銀行口座への出金申請（Connect自動送金）も行えます。</li>
                 </ol>
               </div>
               <div style={{ background: "#f5f7fa", padding: "16px", borderRadius: "8px", fontSize: "13px", color: "#5c6b73", borderLeft: "4px solid #d85b46" }}>
-                🛡️ <strong>技術的なハイライト (Covering Index / Information Schema):</strong><br />
-                個人およびプラットフォームの集計クエリを爆速化するため、MySQL上にカバリングインデックスを冪等に自動追加。MySQLの統計スキーマを参照するため、重複追加によるクラッシュ（Duplicate name）を完全に回避。
+                🛡️ <strong>技術的なハイライト (C2C Escrow / State Machine):</strong><br />
+                購入処理を `'paid'`（運営プール） ➔ `'shipped'`（配送中） ➔ `'completed'`（リリース完了）の3フェーズ状態遷移モデルとしてDB構築。クレジットカードの最初の桁（4はVisa、5はMastercard）を動的に検知し、カードフェイスのグラデーションを変更する高度なCSSとセキュア通信ローディングをフロントに搭載。
               </div>
             </>
           )}
