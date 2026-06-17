@@ -175,3 +175,5 @@ Cloud Run ではローカル用の `127.0.0.1:3306` DSN をそのまま使わず
 2. `DB_USER`, `DB_PASS`, `DB_NAME`, `INSTANCE_UNIX_SOCKET=/cloudsql/PROJECT:REGION:INSTANCE`
 
 `INSTANCE_UNIX_SOCKET` を使う場合は、Cloud Run サービスに Cloud SQL 接続を追加して `/cloudsql/...` が見える状態にする必要があります。
+
+ログイン時に `database is starting` が続く場合は、Cloud Run の最小インスタンスと Cloud SQL 接続設定を確認します。手順は [docs/db-startup-troubleshooting.md](docs/db-startup-troubleshooting.md) にまとめています。

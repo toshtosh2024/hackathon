@@ -28,6 +28,7 @@
 - [x] Improve UI/UX for demo flow.
 - [x] Add image upload flow with Cloud Storage signed URLs.
 - [x] Add item search and filters.
+- [x] Stabilize Cloud Run DB startup for login.
 - [ ] Add basic tests.
 - [x] Add README startup steps.
 - [ ] Prepare demo script.
@@ -64,6 +65,14 @@
 - Updated the home screen with search/filter controls, loading state, and Japanese error messages.
 - Updated the sell screen with image file selection, upload progress, image preview, and submit error handling.
 - Updated `docs/api-spec.md` for item filters and upload URL issuance.
+
+### 2026-06-18 DB startup fix
+
+- Added DB readiness details to `/api/healthz` and guarded API errors so `database is starting` includes the latest connection state.
+- Set Terraform Cloud Run minimum instances to 1 by default to reduce cold-start DB waits before login.
+- Added `scripts/stabilize-cloud-run-db.sh` for gcloud-based Cloud Run/Cloud SQL repair.
+- Added `docs/db-startup-troubleshooting.md` for contributors.
+- Added backend tests for DB startup guard responses and DSN resolution.
 
 ## Remaining Notes
 

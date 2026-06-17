@@ -46,3 +46,9 @@ variable "jwt_secret" {
   default     = ""
   sensitive   = true
 }
+
+variable "cloud_run_min_instances" {
+  description = "Minimum Cloud Run instances. Keep at least 1 during demos to avoid cold-start DB waits."
+  type        = number
+  default     = 1
+}

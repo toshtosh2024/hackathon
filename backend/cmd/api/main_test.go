@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -81,5 +82,55 @@ func TestClampPrice(t *testing.T) {
 				t.Fatalf("clampPrice(%d) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGuardDBReturnsDatabaseStatusWhenStarting(t *testing.T) {
+	a := &app{}
+	a.setDBStatus(context.DeadlineExceeded)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	a.guardDB(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler should not run without a DB handle")
+	})).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["error"] != "database is starting" {
+		t.Fatalf("unexpected error body: %+v", body)
+	}
+	database, ok := body["database"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected database detail, got %+v", body["database"])
+	}
+	if database["ready"] != false {
+		t.Fatalf("expected ready=false, got %+v", database)
+	}
+	if database["lastError"] == "" {
+		t.Fatalf("expected lastError detail, got %+v", database)
+	}
+}
+
+func TestResolveDSNUsesCloudSQLUnixSocket(t *testing.T) {
+	t.Setenv("DATABASE_DSN", "")
+	t.Setenv("DB_USER", "nextmarket")
+	t.Setenv("DB_PASS", "secret")
+	t.Setenv("DB_NAME", "nextmarket")
+	t.Setenv("INSTANCE_UNIX_SOCKET", "/cloudsql/project:asia-northeast1:next-market-mysql")
+	t.Setenv("DB_HOST", "")
+
+	got, err := resolveDSN()
+	if err != nil {
+		t.Fatalf("resolveDSN returned error: %v", err)
+	}
+	want := "nextmarket:secret@unix(/cloudsql/project:asia-northeast1:next-market-mysql)/nextmarket?parseTime=true&multiStatements=true"
+	if got != want {
+		t.Fatalf("resolveDSN = %q, want %q", got, want)
 	}
 }

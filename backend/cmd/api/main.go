@@ -35,6 +35,9 @@ import (
 type app struct {
 	db            *sql.DB
 	dbMu          sync.RWMutex
+	dbStatusMu    sync.RWMutex
+	dbLastError   string
+	dbLastChecked time.Time
 	jwtSecret     string
 	openAIKey     string
 	openAIModel   string
@@ -196,7 +199,9 @@ func (a *app) guardDB(next http.Handler) http.Handler {
 			return
 		}
 		if a.dbHandle() == nil {
-			writeError(w, http.StatusServiceUnavailable, "database is starting")
+			writeErrorDetail(w, http.StatusServiceUnavailable, "database is starting", map[string]any{
+				"database": a.dbStatus(),
+			})
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -208,6 +213,7 @@ func (a *app) initDBLoop() {
 		dsn, err := resolveDSN()
 		if err != nil {
 			log.Printf("database init pending: %v", err)
+			a.setDBStatus(err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -215,6 +221,7 @@ func (a *app) initDBLoop() {
 		db, err := sql.Open("mysql", dsn)
 		if err != nil {
 			log.Printf("database open failed: %v", err)
+			a.setDBStatus(err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -230,12 +237,14 @@ func (a *app) initDBLoop() {
 		cancel()
 		if err != nil {
 			log.Printf("database init failed: %v", err)
+			a.setDBStatus(err)
 			_ = db.Close()
 			time.Sleep(5 * time.Second)
 			continue
 		}
 
 		a.setDB(db)
+		a.setDBStatus(nil)
 		log.Printf("database connected")
 		return
 	}
@@ -251,6 +260,31 @@ func (a *app) setDB(db *sql.DB) {
 	a.dbMu.Lock()
 	defer a.dbMu.Unlock()
 	a.db = db
+}
+
+func (a *app) setDBStatus(err error) {
+	a.dbStatusMu.Lock()
+	defer a.dbStatusMu.Unlock()
+	a.dbLastChecked = time.Now().UTC()
+	if err != nil {
+		a.dbLastError = err.Error()
+		return
+	}
+	a.dbLastError = ""
+}
+
+func (a *app) dbStatus() map[string]any {
+	a.dbStatusMu.RLock()
+	defer a.dbStatusMu.RUnlock()
+	status := map[string]any{
+		"ready":       a.dbHandle() != nil,
+		"lastChecked": "",
+		"lastError":   a.dbLastError,
+	}
+	if !a.dbLastChecked.IsZero() {
+		status["lastChecked"] = a.dbLastChecked.Format(time.RFC3339)
+	}
+	return status
 }
 
 func resolveDSN() (string, error) {
@@ -301,14 +335,20 @@ func (a *app) isAllowedOrigin(origin string) bool {
 func (a *app) health(w http.ResponseWriter, r *http.Request) {
 	db := a.dbHandle()
 	if db == nil {
-		writeError(w, http.StatusServiceUnavailable, "database unavailable")
+		writeErrorDetail(w, http.StatusServiceUnavailable, "database unavailable", map[string]any{
+			"database": a.dbStatus(),
+		})
 		return
 	}
 	if err := db.PingContext(r.Context()); err != nil {
-		writeError(w, http.StatusServiceUnavailable, "database unavailable")
+		a.setDBStatus(err)
+		writeErrorDetail(w, http.StatusServiceUnavailable, "database unavailable", map[string]any{
+			"database": a.dbStatus(),
+		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	a.setDBStatus(nil)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "database": a.dbStatus()})
 }
 
 func (a *app) register(w http.ResponseWriter, r *http.Request) {
@@ -1120,6 +1160,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func writeErrorDetail(w http.ResponseWriter, status int, msg string, detail map[string]any) {
+	body := map[string]any{"error": msg}
+	for key, value := range detail {
+		body[key] = value
+	}
+	writeJSON(w, status, body)
 }
 
 func optionalIntParam(w http.ResponseWriter, r *http.Request, key string) (*int, bool) {
