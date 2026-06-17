@@ -239,6 +239,13 @@ resource "google_cloud_run_v2_service" "app" {
   location            = var.region
   deletion_protection = false
 
+  lifecycle {
+    ignore_changes = [
+      client,
+      client_version,
+    ]
+  }
+
   scaling {
     min_instance_count = var.cloud_run_min_instances
   }
