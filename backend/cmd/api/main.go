@@ -153,6 +153,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", a.health)
+	mux.HandleFunc("PUT /api/local-upload", a.localUpload)
 	mux.HandleFunc("POST /api/auth/register", a.register)
 	mux.HandleFunc("POST /api/auth/login", a.login)
 	mux.HandleFunc("POST /api/profile", a.requireAuth(a.updateProfile))
@@ -190,7 +191,7 @@ func (a *app) cors(next http.Handler) http.Handler {
 			w.Header().Set("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -206,9 +207,14 @@ func withFrontend(api http.Handler) http.Handler {
 	}
 
 	fileServer := http.FileServer(http.Dir(staticDir))
+	uploadServer := http.StripPrefix("/uploads/", http.FileServer(http.Dir(localUploadRoot())))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			api.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/uploads/") {
+			uploadServer.ServeHTTP(w, r)
 			return
 		}
 
@@ -240,7 +246,7 @@ func findFrontendDir() (string, bool) {
 
 func (a *app) guardDB(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/healthz" {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/healthz" || r.URL.Path == "/api/local-upload" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -606,8 +612,15 @@ func (a *app) createUploadURL(w http.ResponseWriter, r *http.Request) {
 	privateUpload := strings.EqualFold(strings.TrimSpace(req.Visibility), "private") || strings.EqualFold(strings.TrimSpace(req.Purpose), "avatar")
 	signed, publicURL, objectPath, err := signedGCSUploadURL(prefix, req.Filename, req.ContentType)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, err.Error())
-		return
+		if !missingGCSConfig() {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		signed, publicURL, objectPath, err = a.localUploadURL(r, prefix, req.Filename, req.ContentType)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "ローカル画像アップロードURLの発行に失敗しました")
+			return
+		}
 	}
 	viewURL := publicURL
 	if privateUpload {
@@ -620,6 +633,44 @@ func (a *app) createUploadURL(w http.ResponseWriter, r *http.Request) {
 		"method":      http.MethodPut,
 		"contentType": req.ContentType,
 	})
+}
+
+func (a *app) localUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	claim, err := a.verifyLocalUploadToken(token)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid upload token")
+		return
+	}
+	if contentType := r.Header.Get("Content-Type"); contentType != "" && contentType != claim.ContentType {
+		writeError(w, http.StatusBadRequest, "content type does not match signed upload")
+		return
+	}
+
+	target := filepath.Join(localUploadRoot(), claim.Path)
+	if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(localUploadRoot())) {
+		writeError(w, http.StatusBadRequest, "invalid upload path")
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare upload directory")
+		return
+	}
+	file, err := os.Create(target)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create upload file")
+		return
+	}
+	defer file.Close()
+	if _, err := io.Copy(file, http.MaxBytesReader(w, r.Body, 12<<20)); err != nil {
+		writeError(w, http.StatusBadRequest, "failed to save upload")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *app) getItem(w http.ResponseWriter, r *http.Request) {
@@ -1781,6 +1832,91 @@ func signedGCSUploadURL(prefix string, filename string, contentType string) (str
 	return uploadURL, publicURL, "gcs://" + bucket + "/" + objectName, nil
 }
 
+type localUploadClaim struct {
+	Path        string `json:"path"`
+	ContentType string `json:"contentType"`
+	Exp         int64  `json:"exp"`
+}
+
+func (a *app) localUploadURL(r *http.Request, prefix string, filename string, contentType string) (string, string, string, error) {
+	objectName := fmt.Sprintf("%s/%s-%s", prefix, time.Now().UTC().Format("20060102150405"), sanitizeObjectName(filename))
+	claim := localUploadClaim{
+		Path:        objectName,
+		ContentType: contentType,
+		Exp:         time.Now().Add(15 * time.Minute).Unix(),
+	}
+	token, err := a.signLocalUploadToken(claim)
+	if err != nil {
+		return "", "", "", err
+	}
+	base := requestBaseURL(r)
+	uploadURL := base + "/api/local-upload?token=" + url.QueryEscape(token)
+	publicURL := base + "/uploads/" + escapeObjectPath(objectName)
+	return uploadURL, publicURL, "local://" + objectName, nil
+}
+
+func (a *app) signLocalUploadToken(claim localUploadClaim) (string, error) {
+	body, err := json.Marshal(claim)
+	if err != nil {
+		return "", err
+	}
+	payload := base64.RawURLEncoding.EncodeToString(body)
+	return payload + "." + hmacSHA256(payload, a.jwtSecret), nil
+}
+
+func (a *app) verifyLocalUploadToken(token string) (localUploadClaim, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return localUploadClaim{}, errors.New("invalid token")
+	}
+	expected := hmacSHA256(parts[0], a.jwtSecret)
+	if !hmac.Equal([]byte(expected), []byte(parts[1])) {
+		return localUploadClaim{}, errors.New("invalid signature")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return localUploadClaim{}, err
+	}
+	var claim localUploadClaim
+	if err := json.Unmarshal(payload, &claim); err != nil {
+		return localUploadClaim{}, err
+	}
+	if time.Now().Unix() > claim.Exp {
+		return localUploadClaim{}, errors.New("token expired")
+	}
+	cleanPath := filepath.Clean(claim.Path)
+	if strings.HasPrefix(cleanPath, "..") || strings.HasPrefix(cleanPath, "/") {
+		return localUploadClaim{}, errors.New("invalid path")
+	}
+	claim.Path = cleanPath
+	return claim, nil
+}
+
+func missingGCSConfig() bool {
+	return strings.TrimSpace(os.Getenv("GCS_BUCKET")) == "" ||
+		strings.TrimSpace(os.Getenv("GCS_CLIENT_EMAIL")) == "" ||
+		strings.TrimSpace(os.Getenv("GCS_PRIVATE_KEY")) == ""
+}
+
+func localUploadRoot() string {
+	return filepath.Join(".", "uploads")
+}
+
+func requestBaseURL(r *http.Request) string {
+	if base := strings.TrimRight(os.Getenv("PUBLIC_BASE_URL"), "/"); base != "" {
+		return base
+	}
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := r.Host
+	if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
+		host = forwardedHost
+	}
+	return scheme + "://" + host
+}
+
 func uploadPrefix(purpose string) string {
 	switch strings.ToLower(strings.TrimSpace(purpose)) {
 	case "avatar", "avatars", "profile":
@@ -1833,6 +1969,9 @@ func assetViewURL(ref string) string {
 	}
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
 		return ref
+	}
+	if strings.HasPrefix(ref, "local://") {
+		return strings.TrimRight(env("PUBLIC_BASE_URL", "http://localhost:8080"), "/") + "/uploads/" + escapeObjectPath(strings.TrimPrefix(ref, "local://"))
 	}
 	if strings.HasPrefix(ref, "gcs://") {
 		signed, err := signedGCSReadURL(ref, 15*time.Minute)
@@ -1949,6 +2088,14 @@ func (a *app) findLatestItemScene(ctx context.Context, userID int64, itemID int6
 
 func (a *app) downloadImageAsset(ctx context.Context, ref string) ([]byte, string, error) {
 	assetURL := ref
+	if strings.HasPrefix(strings.TrimSpace(ref), "local://") {
+		path := filepath.Join(localUploadRoot(), strings.TrimPrefix(ref, "local://"))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, "", err
+		}
+		return data, http.DetectContentType(data), nil
+	}
 	if strings.HasPrefix(strings.TrimSpace(ref), "gcs://") {
 		signed, err := signedGCSReadURL(ref, 15*time.Minute)
 		if err != nil {

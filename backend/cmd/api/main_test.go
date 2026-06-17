@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -173,5 +174,35 @@ func TestAssetViewURLKeepsPublicHTTPURL(t *testing.T) {
 	got := assetViewURL("https://storage.googleapis.com/example/items/sample.jpg")
 	if got != "https://storage.googleapis.com/example/items/sample.jpg" {
 		t.Fatalf("assetViewURL changed public URL: %q", got)
+	}
+}
+
+func TestLocalUploadURLSignsVerifiableToken(t *testing.T) {
+	a := &app{jwtSecret: "test-secret"}
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/upload", nil)
+	uploadURL, publicURL, objectPath, err := a.localUploadURL(req, "items", "Sample Bag.JPG", "image/jpeg")
+	if err != nil {
+		t.Fatalf("localUploadURL returned error: %v", err)
+	}
+	if !strings.HasPrefix(uploadURL, "http://localhost:8080/api/local-upload?token=") {
+		t.Fatalf("unexpected upload URL: %q", uploadURL)
+	}
+	if !strings.HasPrefix(publicURL, "http://localhost:8080/uploads/items/") {
+		t.Fatalf("unexpected public URL: %q", publicURL)
+	}
+	if !strings.HasPrefix(objectPath, "local://items/") {
+		t.Fatalf("unexpected object path: %q", objectPath)
+	}
+
+	parsed, err := url.Parse(uploadURL)
+	if err != nil {
+		t.Fatalf("parse upload URL: %v", err)
+	}
+	claim, err := a.verifyLocalUploadToken(parsed.Query().Get("token"))
+	if err != nil {
+		t.Fatalf("verifyLocalUploadToken returned error: %v", err)
+	}
+	if claim.ContentType != "image/jpeg" || !strings.HasPrefix(claim.Path, "items/") {
+		t.Fatalf("unexpected claim: %+v", claim)
 	}
 }

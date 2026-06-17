@@ -118,6 +118,7 @@ Request:
 
 `purpose` is optional. Use `item` for listing images and `avatar` for profile images. Objects are stored under matching Cloud Storage prefixes.
 Set `visibility` to `private` for non-public uploads such as profile photos.
+When GCS environment variables are not set in local development, the backend falls back to `PUT /api/local-upload` and serves files from `/uploads`.
 
 Response:
 
