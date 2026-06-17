@@ -29,7 +29,8 @@ export function MyPageScreen({
   onSessionUpdated,
   onOpenSell,
   onOpenItem,
-  onCancelled
+  onCancelled,
+  onCompleteStep
 }: {
   user: User | null;
   myItems: Item[];
@@ -39,6 +40,7 @@ export function MyPageScreen({
   onOpenSell: () => void;
   onOpenItem: (itemId: number) => void;
   onCancelled: (itemId: number) => Promise<void>;
+  onCompleteStep?: (step: number) => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [profileError, setProfileError] = useState("");
@@ -118,6 +120,7 @@ export function MyPageScreen({
     try {
       await api(`/barter/loops/${loopId}/receive`, { method: "POST" });
       loadBarterLoops();
+      if (onCompleteStep) onCompleteStep(2);
     } catch (err) {
       alert(err instanceof Error ? err.message : "受取報告に失敗しました");
     }

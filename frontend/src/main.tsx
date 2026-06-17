@@ -90,6 +90,10 @@ function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
 
+  // Demo Tour States
+  const [demoTourActive, setDemoTourActive] = useState(false);
+  const [demoStep, setDemoStep] = useState(1);
+
   useEffect(() => {
     function syncRoute() {
       setRoute(readRoute());
@@ -178,6 +182,19 @@ function App() {
     setRoute({ page: "auth" });
   };
 
+  async function runDemoSeeder() {
+    try {
+      const data = await api<{ status: string; message: string }>("/demo/seed", { method: "POST" });
+      setDemoTourActive(true);
+      setDemoStep(1);
+      setNotice(data.message);
+      await Promise.all([loadItems(), loadConversations(), loadMyItems()]);
+      navigate({ page: "home" });
+    } catch (err) {
+      alert("デモセットアップに失敗しました: " + (err instanceof Error ? err.message : ""));
+    }
+  }
+
   return (
     <main className="app-shell">
       {notice && (
@@ -218,6 +235,7 @@ function App() {
                 void loadItems(f);
               }}
               onOpenItem={(itemId) => navigate({ page: "item", itemId })}
+              onRunDemo={runDemoSeeder}
             />
           )}
 
@@ -251,6 +269,11 @@ function App() {
                   await loadMessages(conversationId);
                   navigate({ page: "messages" });
                 }}
+                onCompleteStep={(step) => {
+                  if (demoTourActive && demoStep === step) {
+                    setDemoStep(step + 1);
+                  }
+                }}
               />
             )
           )}
@@ -281,6 +304,11 @@ function App() {
                 await Promise.all([loadItems(itemFilters), loadMyItems()]);
                 setNotice(`出品を取り下げました: #${itemId}`);
               }}
+              onCompleteStep={(step) => {
+                if (demoTourActive && demoStep === step) {
+                  setDemoStep(step + 1);
+                }
+              }}
             />
           )}
 
@@ -309,6 +337,20 @@ function App() {
             </button>
           ))}
         </nav>
+      )}
+
+      {demoTourActive && (
+        <DemoTourWidget 
+          step={demoStep} 
+          onClose={() => setDemoTourActive(false)} 
+          onNavigate={(page, id) => {
+            if (page === "item" && id) {
+              navigate({ page: "item", itemId: id });
+            } else {
+              navigate({ page: page as any });
+            }
+          }}
+        />
       )}
     </main>
   );
@@ -457,7 +499,8 @@ function HomeScreen({
   itemsError,
   filters,
   onFiltersChange,
-  onOpenItem
+  onOpenItem,
+  onRunDemo
 }: {
   items: Item[];
   itemsLoading: boolean;
@@ -465,12 +508,35 @@ function HomeScreen({
   filters: { q: string; category: string; min_price: string; max_price: string };
   onFiltersChange: (filters: { q: string; category: string; min_price: string; max_price: string }) => void;
   onOpenItem: (itemId: number) => void;
+  onRunDemo?: () => void;
 }) {
   return (
     <section className="screen home-screen">
       <div className="hero-banner">
         <h2>次世代AI交渉 ＆ わらしべ物々交換フリマ</h2>
         <p>エージェント交渉からマルチホップ物々交換、AI写真編集、Stripeエスクローまで完備した最先端フリマ</p>
+        {onRunDemo && (
+          <button 
+            onClick={onRunDemo} 
+            style={{ 
+              marginTop: "16px", 
+              background: "linear-gradient(135deg, #fbbf24, #d85b46)", 
+              color: "#ffffff", 
+              border: "none", 
+              padding: "12px 24px", 
+              borderRadius: "30px", 
+              fontWeight: 700, 
+              fontSize: "14px", 
+              cursor: "pointer", 
+              boxShadow: "0 4px 15px rgba(216, 91, 70, 0.4)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px"
+            }}
+          >
+            <Sparkles size={16} /> ⚡ デモデータを自動投入（デモを実行）
+          </button>
+        )}
       </div>
 
       <div className="search-row">
@@ -757,7 +823,8 @@ function ItemDetailScreen({
   onBack,
   onChanged,
   onNotice,
-  onConversationCreated
+  onConversationCreated,
+  onCompleteStep
 }: {
   item: Item | null;
   user: User | null;
@@ -766,6 +833,7 @@ function ItemDetailScreen({
   onChanged: (itemId: number) => void;
   onNotice: (message: string) => void;
   onConversationCreated: (conversationId: number) => Promise<void>;
+  onCompleteStep?: (step: number) => void;
 }) {
   const [question, setQuestion] = useState("通勤用として雨の日にも使えそう？");
   const [answer, setAnswer] = useState("");
@@ -891,6 +959,7 @@ function ItemDetailScreen({
       setVideoSimulated(data.simulated);
       setIsPlayingVideo(true);
       onNotice(data.simulated ? "映画風シネマグラフを生成しました！" : "AI動画の生成が完了しました！");
+      if (onCompleteStep) onCompleteStep(3);
     } catch (err) {
       setVideoError(err instanceof Error ? err.message : "AI動画の生成に失敗しました");
     } finally {
@@ -947,6 +1016,7 @@ function ItemDetailScreen({
           } else {
             onNotice("AI交渉が決裂しました。予算を調整して再交渉できます。");
           }
+          if (onCompleteStep) onCompleteStep(1);
         } else {
           setDialogueIndex(idx);
         }
@@ -1522,3 +1592,117 @@ function renderMarkdown(text: string): string {
 function renderMarkdownText(text: string) {
   return renderMarkdown(text);
 }
+
+// ==========================================
+// Immersive Guided Demo Tour Guide Widget
+// ==========================================
+
+export function DemoTourWidget({
+  step,
+  onClose,
+  onNavigate
+}: {
+  step: number;
+  onClose: () => void;
+  onNavigate: (page: string, id?: number) => void;
+}) {
+  return (
+    <div style={{
+      position: "fixed",
+      bottom: "80px",
+      right: "24px",
+      background: "rgba(15, 23, 42, 0.95)",
+      backdropFilter: "blur(12px)",
+      border: "2px solid #fbbf24",
+      borderRadius: "16px",
+      padding: "20px",
+      width: "360px",
+      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 0 15px rgba(251, 191, 36, 0.3)",
+      color: "#ffffff",
+      zIndex: 2000,
+      display: "flex",
+      flexDirection: "column",
+      gap: "14px",
+      animation: "sparkleGlow 2s infinite alternate ease-in-out"
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155", paddingBottom: "10px" }}>
+        <strong style={{ fontSize: "14px", color: "#fbbf24", display: "flex", alignItems: "center", gap: "6px" }}>
+          🤖 Next Market AI体験ツアーガイド
+        </strong>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "16px", cursor: "pointer" }}>✕</button>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        
+        {/* Step 1 */}
+        <div style={{ opacity: step >= 1 ? 1 : 0.4, display: "flex", gap: "10px", alignItems: "start" }}>
+          <span style={{ fontSize: "18px" }}>{step > 1 ? "✅" : "🤖"}</span>
+          <div>
+            <strong style={{ fontSize: "13px", color: step === 1 ? "#fbbf24" : "#ffffff", textDecoration: step > 1 ? "line-through" : "none" }}>
+              1. 大阪商人AIと値引き交渉をしよう！
+            </strong>
+            {step === 1 && (
+              <>
+                <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#cbd5e1", lineHeight: "1.4" }}>
+                  デモ投入した商品「iPhone 14 Pro」を開き、「🤖 代理AI交渉」をクリック！予算を設定して交渉シミュレーションを開始してください。
+                </p>
+                <button onClick={() => onNavigate("item", 9901)} style={{ marginTop: "8px", background: "#fbbf24", color: "#0f172a", border: "none", padding: "4px 10px", borderRadius: "4px", fontSize: "11px", fontWeight: "bold", cursor: "pointer" }}>
+                  👉 対象のiPhone詳細へジャンプ
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Step 2 */}
+        <div style={{ opacity: step >= 2 ? 1 : 0.4, display: "flex", gap: "10px", alignItems: "start" }}>
+          <span style={{ fontSize: "18px" }}>{step > 2 ? "✅" : "🔄"}</span>
+          <div>
+            <strong style={{ fontSize: "13px", color: step === 2 ? "#fbbf24" : "#ffffff", textDecoration: step > 2 ? "line-through" : "none" }}>
+              2. 3者間わらしべ物々交換を体験しよう！
+            </strong>
+            {step === 2 && (
+              <>
+                <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#cbd5e1", lineHeight: "1.4" }}>
+                  「マイページ」の「🔄 AIわらしべ物々交換」タブを開き、すでにマッチング成立したループ提案を「承認」して、発送・受取（エスクロー解除）まで進めてください。
+                </p>
+                <button onClick={() => onNavigate("mypage")} style={{ marginTop: "8px", background: "#fbbf24", color: "#0f172a", border: "none", padding: "4px 10px", borderRadius: "4px", fontSize: "11px", fontWeight: "bold", cursor: "pointer" }}>
+                  👉 マイページの物々交換へジャンプ
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Step 3 */}
+        <div style={{ opacity: step >= 3 ? 1 : 0.4, display: "flex", gap: "10px", alignItems: "start" }}>
+          <span style={{ fontSize: "18px" }}>{step > 3 ? "🎉" : "📸"}</span>
+          <div>
+            <strong style={{ fontSize: "13px", color: step === 3 ? "#fbbf24" : "#ffffff", textDecoration: step > 3 ? "line-through" : "none" }}>
+              3. AI使用風景＆シネマ動画を作ろう！
+            </strong>
+            {step === 3 && (
+              <>
+                <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#cbd5e1", lineHeight: "1.4" }}>
+                  商品詳細ページ（例: iPhone）で「AI画像を生成」を行い、生成後に「🎬 AI動画を生成・再生」を起動してシネマグラフを再生しましょう！
+                </p>
+                <button onClick={() => onNavigate("item", 9901)} style={{ marginTop: "8px", background: "#fbbf24", color: "#0f172a", border: "none", padding: "4px 10px", borderRadius: "4px", fontSize: "11px", fontWeight: "bold", cursor: "pointer" }}>
+                  👉 iPhone詳細へジャンプ
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {step > 3 && (
+        <div style={{ background: "rgba(16, 185, 129, 0.2)", border: "1px solid #10b981", borderRadius: "8px", padding: "10px", textAlign: "center", animation: "sparkleGlow 1s infinite alternate" }}>
+          <strong style={{ fontSize: "13px", color: "#34d399", display: "block" }}>🎉 デモツアー完了！</strong>
+          <span style={{ fontSize: "11px", color: "#e2e8f0" }}>すべての次世代AI機能をご体験いただき、誠にありがとうございました！</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(<App />);
