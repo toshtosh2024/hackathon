@@ -98,7 +98,7 @@ func main() {
 		db:            db,
 		jwtSecret:     env("JWT_SECRET", "dev-secret"),
 		geminiKey:     os.Getenv("GEMINI_API_KEY"),
-		geminiModel:   env("GEMINI_MODEL", "gemini-2.0-flash"),
+		geminiModel:   env("GEMINI_MODEL", "gemini-2.5-flash"),
 		allowedOrigin: env("ALLOWED_ORIGIN", "http://localhost:5173"),
 	}
 
@@ -547,7 +547,7 @@ func (a *app) askAI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "item not found")
 		return
 	}
-	prompt := fmt.Sprintf("あなたはフリマアプリの購入相談AIです。商品情報だけを根拠に、短く実用的に回答してください。\n商品名: %s\nカテゴリ: %s\n価格: %d円\n説明: %s\n質問: %s", it.Title, it.Category, it.Price, it.Description, req.Question)
+	prompt := fmt.Sprintf("あなたはフリマアプリの購入相談AIです。商品情報だけを根拠に、短く実用的に回答して。答えのみを端的に出力して。「承知しました」みたいな文言は一切いらない。\n商品名: %s\nカテゴリ: %s\n価格: %d円\n説明: %s\n質問: %s", it.Title, it.Category, it.Price, it.Description, req.Question)
 	text, err := a.callGemini(r.Context(), prompt)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())

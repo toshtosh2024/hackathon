@@ -80,6 +80,10 @@ const PRIMARY_NAV: NavItem[] = [
   { page: "mypage", label: "マイページ", icon: UserCircle2 }
 ];
 
+function MarkdownBlock({ text, className }: { text: string; className?: string }) {
+  return <div className={className ? `markdown-block ${className}` : "markdown-block"} dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
+}
+
 function App() {
   const [token, setToken] = useState(localStorage.getItem("token") ?? "");
   const [user, setUser] = useState<User | null>(loadUser());
@@ -583,6 +587,12 @@ function CreateItemScreen({
           </button>
           {aiError && <p className="error">{aiError}</p>}
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="商品説明" />
+          {description && (
+            <section className="markdown-preview">
+              <p className="eyebrow">Markdown Preview</p>
+              <MarkdownBlock className="preview-body" text={description} />
+            </section>
+          )}
           <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="画像URL" />
           <button className="primary-button" disabled={!description} type="submit">
             <ShoppingBag size={18} />
@@ -699,7 +709,7 @@ function ItemDetailScreen({
             </div>
             <strong>¥{item.price.toLocaleString()}</strong>
           </div>
-          <p className="item-description">{item.description}</p>
+          <MarkdownBlock className="item-description" text={item.description} />
           <div className="detail-actions">
             <button onClick={like}>
               <Heart size={18} />
@@ -729,7 +739,7 @@ function ItemDetailScreen({
               {loadingAI ? "回答中" : "AIに質問"}
             </button>
             {aiError && <p className="error">{aiError}</p>}
-            {answer && <p className="ai-answer">{answer}</p>}
+            {answer && <MarkdownBlock className="ai-answer" text={answer} />}
           </div>
         </article>
       </section>
@@ -905,6 +915,104 @@ function navigate(route: Route) {
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
+}
+
+function renderMarkdown(source: string) {
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const html: string[] = [];
+  let inList = false;
+  let inCodeBlock = false;
+  let codeLines: string[] = [];
+  let paragraph: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+    html.push(`<p>${renderInline(paragraph.join("<br />"))}</p>`);
+    paragraph = [];
+  };
+
+  const closeList = () => {
+    if (!inList) return;
+    html.push("</ul>");
+    inList = false;
+  };
+
+  const closeCodeBlock = () => {
+    if (!inCodeBlock) return;
+    html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+    inCodeBlock = false;
+    codeLines = [];
+  };
+
+  for (const line of lines) {
+    if (line.trim().startsWith("```")) {
+      flushParagraph();
+      closeList();
+      if (inCodeBlock) {
+        closeCodeBlock();
+      } else {
+        inCodeBlock = true;
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeLines.push(line);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,3})\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+
+    if (heading) {
+      flushParagraph();
+      closeList();
+      const level = Math.min(heading[1].length, 3);
+      html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    if (bullet) {
+      flushParagraph();
+      if (!inList) {
+        html.push("<ul>");
+        inList = true;
+      }
+      html.push(`<li>${renderInline(bullet[1])}</li>`);
+      continue;
+    }
+
+    if (line.trim() === "") {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+
+    paragraph.push(escapeHtml(line));
+  }
+
+  flushParagraph();
+  closeList();
+  closeCodeBlock();
+
+  return html.join("");
+}
+
+function renderInline(text: string) {
+  return text
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function loadUser() {
