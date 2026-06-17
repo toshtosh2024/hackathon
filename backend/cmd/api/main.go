@@ -123,7 +123,10 @@ func main() {
 
 func (a *app) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", a.allowedOrigin)
+		if origin := r.Header.Get("Origin"); a.isAllowedOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		if r.Method == http.MethodOptions {
@@ -132,6 +135,26 @@ func (a *app) cors(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (a *app) isAllowedOrigin(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	allowed := []string{
+		"http://localhost:5173",
+		"http://127.0.0.1:5173",
+		a.allowedOrigin,
+	}
+	for _, value := range strings.Split(a.allowedOrigin, ",") {
+		allowed = append(allowed, strings.TrimSpace(value))
+	}
+	for _, value := range allowed {
+		if origin == value {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *app) health(w http.ResponseWriter, r *http.Request) {

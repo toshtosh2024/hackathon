@@ -2,13 +2,17 @@ import { FormEvent, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bot,
+  ChevronRight,
   Heart,
+  Home,
   LogIn,
   MessageCircle,
   PackagePlus,
   Send,
   ShoppingBag,
   Sparkles,
+  Store,
+  UserCircle2,
   WalletCards
 } from "lucide-react";
 import "./styles.css";
@@ -53,13 +57,36 @@ type Message = {
   createdAt: string;
 };
 
+type Route =
+  | { page: "auth" }
+  | { page: "home" }
+  | { page: "sell" }
+  | { page: "messages" }
+  | { page: "mypage" }
+  | { page: "item"; itemId: number };
+
+type NavPage = "home" | "sell" | "messages" | "mypage";
+
+type NavItem = {
+  page: NavPage;
+  label: string;
+  icon: typeof Home;
+};
+
+const PRIMARY_NAV: NavItem[] = [
+  { page: "home", label: "ホーム", icon: Home },
+  { page: "sell", label: "出品", icon: PackagePlus },
+  { page: "messages", label: "DM", icon: MessageCircle },
+  { page: "mypage", label: "マイページ", icon: UserCircle2 }
+];
+
 function App() {
   const [token, setToken] = useState(localStorage.getItem("token") ?? "");
   const [user, setUser] = useState<User | null>(loadUser());
+  const [route, setRoute] = useState<Route>(() => normalizeRoute(readRoute(), Boolean(localStorage.getItem("token"))));
   const [items, setItems] = useState<Item[]>([]);
-  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [notice, setNotice] = useState("");
 
@@ -68,10 +95,34 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (token) {
-      void loadConversations();
+    if (!token) {
+      setConversations([]);
+      setMessages([]);
+      setSelectedConversationId(null);
+      return;
+    }
+    void loadConversations();
+  }, [token]);
+
+  useEffect(() => {
+    const syncRoute = () => setRoute(normalizeRoute(readRoute(), Boolean(token)));
+    window.addEventListener("hashchange", syncRoute);
+    syncRoute();
+    return () => window.removeEventListener("hashchange", syncRoute);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      navigate({ page: "auth" });
     }
   }, [token]);
+
+  const selectedItem = route.page === "item" ? items.find((item) => item.id === route.itemId) ?? null : null;
+  const selectedConversation = conversations.find((conversation) => conversation.id === selectedConversationId) ?? null;
+  const activeCount = items.filter((item) => item.status === "active").length;
+  const soldCount = items.filter((item) => item.status === "sold").length;
+  const myItems = user ? items.filter((item) => item.sellerId === user.id) : [];
+  const likedTotal = items.reduce((sum, item) => sum + item.likeCount, 0);
 
   async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
     const headers = new Headers(options.headers);
@@ -86,17 +137,19 @@ function App() {
   async function loadItems() {
     const data = await api<{ items: Item[] }>("/items");
     setItems(data.items);
-    setSelectedItem((current) => current ?? data.items[0] ?? null);
   }
 
   async function loadConversations() {
     const data = await api<{ conversations: Conversation[] }>("/conversations");
     setConversations(data.conversations);
+    if (data.conversations.length > 0) {
+      setSelectedConversationId((current) => current ?? data.conversations[0].id);
+    }
   }
 
-  async function loadMessages(conversation: Conversation) {
-    setSelectedConversation(conversation);
-    const data = await api<{ messages: Message[] }>(`/conversations/${conversation.id}/messages`);
+  async function loadMessages(conversationId: number) {
+    setSelectedConversationId(conversationId);
+    const data = await api<{ messages: Message[] }>(`/conversations/${conversationId}/messages`);
     setMessages(data.messages);
   }
 
@@ -105,75 +158,125 @@ function App() {
     setUser(nextUser);
     localStorage.setItem("token", nextToken);
     localStorage.setItem("user", JSON.stringify(nextUser));
+    setNotice(`${nextUser.name} さん、ようこそ`);
+    navigate({ page: "home" });
+  }
+
+  function logout() {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setToken("");
+    setUser(null);
+    setNotice("ログアウトしました");
+    navigate({ page: "auth" });
+  }
+
+  async function refreshItemsAndKeepSelection(itemId?: number) {
+    await loadItems();
+    if (itemId) {
+      navigate({ page: "item", itemId });
+    }
   }
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">Next Market</p>
-          <h1>AIが出品と購入を支えるフリマ</h1>
-        </div>
-        <div className="session">
-          <span>{user ? `${user.name} でログイン中` : "未ログイン"}</span>
-          {user && (
-            <button
-              className="ghost-button"
-              onClick={() => {
-                localStorage.clear();
-                setToken("");
-                setUser(null);
-                setNotice("ログアウトしました");
-              }}
-            >
-              ログアウト
-            </button>
+    <main className={route.page === "auth" ? "app-shell auth-shell" : "app-shell"}>
+      {route.page === "auth" ? (
+        <AuthScreen api={api} onAuth={saveSession} notice={notice} />
+      ) : (
+        <>
+          <header className="topbar">
+            <div>
+              <p className="eyebrow">Next Market</p>
+              <h1>売る、見つける、つながる。</h1>
+              <p className="lede">メルカリのように役割ごとにページを分け、ホームから出品やDMへ自然に移れる構成に再設計しました。</p>
+            </div>
+            <div className="session-card">
+              <div>
+                <strong>{user?.name}</strong>
+                <p>{user?.email}</p>
+              </div>
+              <button className="ghost-button" onClick={logout}>
+                ログアウト
+              </button>
+            </div>
+          </header>
+
+          <Navigation route={route} />
+
+          {notice && <p className="notice">{notice}</p>}
+
+          {route.page === "home" && (
+            <HomeScreen
+              items={items}
+              activeCount={activeCount}
+              soldCount={soldCount}
+              likedTotal={likedTotal}
+              onOpenItem={(itemId) => navigate({ page: "item", itemId })}
+              onOpenSell={() => navigate({ page: "sell" })}
+              onOpenMessages={() => navigate({ page: "messages" })}
+            />
           )}
-        </div>
-      </header>
 
-      {notice && <p className="notice">{notice}</p>}
+          {route.page === "sell" && (
+            <CreateItemScreen
+              api={api}
+              onCreated={(item) => {
+                setItems((current) => [item, ...current]);
+                setNotice("商品を出品しました");
+                navigate({ page: "item", itemId: item.id });
+              }}
+            />
+          )}
 
-      <section className="workspace">
-        <AuthPanel onAuth={saveSession} api={api} />
-        <CreateItemPanel
-          disabled={!user}
-          api={api}
-          onCreated={(item) => {
-            setItems([item, ...items]);
-            setSelectedItem(item);
-            setNotice("商品を出品しました");
-          }}
-        />
-        <ItemList items={items} selectedItem={selectedItem} onSelect={setSelectedItem} />
-        <ItemDetail
-          item={selectedItem}
-          user={user}
-          api={api}
-          onChanged={loadItems}
-          onNotice={setNotice}
-          onConversationCreated={loadConversations}
-        />
-        <MessagesPanel
-          user={user}
-          conversations={conversations}
-          selectedConversation={selectedConversation}
-          messages={messages}
-          api={api}
-          onSelect={loadMessages}
-          onSent={(conversation) => void loadMessages(conversation)}
-        />
-      </section>
+          {route.page === "item" && (
+            <ItemDetailScreen
+              item={selectedItem}
+              user={user}
+              api={api}
+              onBack={() => navigate({ page: "home" })}
+              onChanged={(itemId) => void refreshItemsAndKeepSelection(itemId)}
+              onNotice={setNotice}
+              onConversationCreated={async (conversationId) => {
+                await loadConversations();
+                await loadMessages(conversationId);
+                navigate({ page: "messages" });
+              }}
+            />
+          )}
+
+          {route.page === "messages" && (
+            <MessagesScreen
+              user={user}
+              conversations={conversations}
+              selectedConversation={selectedConversation}
+              messages={messages}
+              api={api}
+              onSelect={(conversationId) => void loadMessages(conversationId)}
+            />
+          )}
+
+          {route.page === "mypage" && (
+            <MyPageScreen
+              user={user}
+              myItems={myItems}
+              onOpenSell={() => navigate({ page: "sell" })}
+              onOpenItem={(itemId) => navigate({ page: "item", itemId })}
+            />
+          )}
+        </>
+      )}
     </main>
   );
 }
 
-function AuthPanel({
+function AuthScreen({
   api,
-  onAuth
+  onAuth,
+  notice
 }: {
   api: <T>(path: string, options?: RequestInit) => Promise<T>;
   onAuth: (token: string, user: User) => void;
+  notice: string;
 }) {
   const [mode, setMode] = useState<"login" | "register">("register");
   const [name, setName] = useState("Toshi");
@@ -196,39 +299,216 @@ function AuthPanel({
   }
 
   return (
-    <section className="panel auth-panel">
-      <div className="panel-heading">
-        <LogIn size={20} />
-        <h2>認証</h2>
+    <section className="auth-layout">
+      <div className="auth-hero">
+        <p className="eyebrow">Next Market</p>
+        <h1>フリマ体験を、最初の一画面から整える。</h1>
+        <p>
+          認証を最初に分離し、その後はホームを中心に「探す」「出品する」「やり取りする」をページ単位で遷移できるようにしました。
+        </p>
+        <div className="auth-points">
+          <article>
+            <Store size={18} />
+            <div>
+              <strong>ホームは一覧中心</strong>
+              <p>商品サムネイルと導線を集約し、まず何ができるかが分かる構成です。</p>
+            </div>
+          </article>
+          <article>
+            <PackagePlus size={18} />
+            <div>
+              <strong>出品は独立画面</strong>
+              <p>説明文生成や入力を一箇所にまとめ、迷わず出品に集中できます。</p>
+            </div>
+          </article>
+          <article>
+            <MessageCircle size={18} />
+            <div>
+              <strong>DMも別画面</strong>
+              <p>会話一覧とメッセージを切り離し、詳細画面のノイズを減らしています。</p>
+            </div>
+          </article>
+        </div>
       </div>
-      <div className="segmented">
-        <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>
-          新規登録
-        </button>
-        <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
-          ログイン
-        </button>
-      </div>
-      <form onSubmit={submit}>
-        {mode === "register" && <input value={name} onChange={(e) => setName(e.target.value)} placeholder="名前" />}
-        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="メール" />
-        <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="パスワード" type="password" />
-        <button className="primary-button" type="submit">
-          <LogIn size={18} />
-          {mode === "register" ? "登録" : "ログイン"}
-        </button>
-      </form>
-      {error && <p className="error">{error}</p>}
+
+      <section className="auth-card panel">
+        <div className="panel-heading">
+          <LogIn size={20} />
+          <h2>{mode === "register" ? "新規登録" : "ログイン"}</h2>
+        </div>
+        <p className="muted">認証後にホームへ遷移します。</p>
+        <div className="segmented">
+          <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>
+            新規登録
+          </button>
+          <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
+            ログイン
+          </button>
+        </div>
+        <form onSubmit={submit}>
+          {mode === "register" && <input value={name} onChange={(e) => setName(e.target.value)} placeholder="名前" />}
+          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="メール" />
+          <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="パスワード" type="password" />
+          <button className="primary-button" type="submit">
+            <LogIn size={18} />
+            {mode === "register" ? "登録してはじめる" : "ログインしてホームへ"}
+          </button>
+        </form>
+        {notice && <p className="notice inline-notice">{notice}</p>}
+        {error && <p className="error">{error}</p>}
+      </section>
     </section>
   );
 }
 
-function CreateItemPanel({
-  disabled,
+function Navigation({ route }: { route: Route }) {
+  return (
+    <nav className="nav-bar">
+      {PRIMARY_NAV.map((item) => {
+        const Icon = item.icon;
+        const active = route.page === item.page;
+        return (
+          <button key={item.page} className={active ? "nav-link active" : "nav-link"} onClick={() => navigate({ page: item.page })}>
+            <Icon size={18} />
+            {item.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function HomeScreen({
+  items,
+  activeCount,
+  soldCount,
+  likedTotal,
+  onOpenItem,
+  onOpenSell,
+  onOpenMessages
+}: {
+  items: Item[];
+  activeCount: number;
+  soldCount: number;
+  likedTotal: number;
+  onOpenItem: (itemId: number) => void;
+  onOpenSell: () => void;
+  onOpenMessages: () => void;
+}) {
+  const leadItem = items[0] ?? null;
+  const latestItems = items.slice(0, 6);
+
+  return (
+    <section className="page-shell home-shell">
+      <div className="hero-card panel">
+        <div className="hero-copy">
+          <p className="eyebrow">Marketplace Home</p>
+          <h2>まずはホームで流れをつかむ</h2>
+          <p>商品一覧を主役にしつつ、出品・DM・売上確認への入口をまとめたメイン画面です。</p>
+          <div className="hero-actions">
+            <button className="primary-button" onClick={onOpenSell}>
+              <PackagePlus size={18} />
+              出品する
+            </button>
+            <button className="ghost-button" onClick={onOpenMessages}>
+              <MessageCircle size={18} />
+              DMを見る
+            </button>
+          </div>
+        </div>
+        {leadItem && (
+          <button className="featured-card" onClick={() => onOpenItem(leadItem.id)}>
+            <img src={leadItem.imageUrl || "/placeholder.svg"} alt="" />
+            <div>
+              <p className="eyebrow">{leadItem.category}</p>
+              <strong>{leadItem.title}</strong>
+              <span>¥{leadItem.price.toLocaleString()}</span>
+              <small>{leadItem.sellerName} さんが出品</small>
+            </div>
+          </button>
+        )}
+      </div>
+
+      <div className="stats-grid">
+        <article className="stat-card panel">
+          <span>出品中</span>
+          <strong>{activeCount}</strong>
+        </article>
+        <article className="stat-card panel">
+          <span>売却済み</span>
+          <strong>{soldCount}</strong>
+        </article>
+        <article className="stat-card panel">
+          <span>総いいね</span>
+          <strong>{likedTotal}</strong>
+        </article>
+      </div>
+
+      <div className="content-grid">
+        <section className="panel catalog-panel">
+          <div className="section-head">
+            <div>
+              <p className="eyebrow">New Arrivals</p>
+              <h3>新着アイテム</h3>
+            </div>
+          </div>
+          <div className="card-grid">
+            {latestItems.map((item) => (
+              <button key={item.id} className="catalog-card" onClick={() => onOpenItem(item.id)}>
+                <img src={item.imageUrl || "/placeholder.svg"} alt="" />
+                <div>
+                  <strong>{item.title}</strong>
+                  <span>¥{item.price.toLocaleString()}</span>
+                  <small>
+                    {item.category} / {item.status}
+                  </small>
+                </div>
+              </button>
+            ))}
+            {latestItems.length === 0 && <p className="muted">まだ商品がありません。</p>}
+          </div>
+        </section>
+
+        <aside className="panel shortcut-panel">
+          <div className="section-head">
+            <div>
+              <p className="eyebrow">Shortcut</p>
+              <h3>次にやること</h3>
+            </div>
+          </div>
+          <button className="shortcut-row" onClick={onOpenSell}>
+            <span>
+              <strong>商品を出品する</strong>
+              <small>AIで説明文を作って公開</small>
+            </span>
+            <ChevronRight size={18} />
+          </button>
+          <button className="shortcut-row" onClick={onOpenMessages}>
+            <span>
+              <strong>DMを確認する</strong>
+              <small>購入前の相談や値段交渉へ</small>
+            </span>
+            <ChevronRight size={18} />
+          </button>
+          {leadItem && (
+            <button className="shortcut-row" onClick={() => onOpenItem(leadItem.id)}>
+              <span>
+                <strong>おすすめ商品を見る</strong>
+                <small>{leadItem.title} の詳細へ</small>
+              </span>
+              <ChevronRight size={18} />
+            </button>
+          )}
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function CreateItemScreen({
   api,
   onCreated
 }: {
-  disabled: boolean;
   api: <T>(path: string, options?: RequestInit) => Promise<T>;
   onCreated: (item: Item) => void;
 }) {
@@ -264,71 +544,53 @@ function CreateItemPanel({
   }
 
   return (
-    <section className="panel create-panel">
-      <div className="panel-heading">
-        <PackagePlus size={20} />
-        <h2>出品</h2>
-      </div>
-      <form onSubmit={submit}>
-        <input disabled={disabled} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="商品名" />
-        <div className="two-col">
-          <input disabled={disabled} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="カテゴリ" />
-          <input disabled={disabled} value={price} onChange={(e) => setPrice(Number(e.target.value))} type="number" placeholder="価格" />
+    <section className="page-shell">
+      <div className="split-heading">
+        <div>
+          <p className="eyebrow">Sell</p>
+          <h2>出品ページ</h2>
+          <p className="muted">ホームから移動して、出品作業だけに集中できる画面です。</p>
         </div>
-        <input disabled={disabled} value={condition} onChange={(e) => setCondition(e.target.value)} placeholder="状態" />
-        <textarea disabled={disabled} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="AIに渡すメモ" />
-        <button className="ai-button" disabled={disabled || loadingAI} type="button" onClick={generateDescription}>
-          <Sparkles size={18} />
-          {loadingAI ? "生成中" : "Geminiで説明生成"}
+        <button className="ghost-button" onClick={() => navigate({ page: "home" })}>
+          <Home size={18} />
+          ホームへ戻る
         </button>
-        <textarea disabled={disabled} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="商品説明" />
-        <input disabled={disabled} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="画像URL" />
-        <button className="primary-button" disabled={disabled || !description} type="submit">
-          <ShoppingBag size={18} />
-          出品する
-        </button>
-      </form>
-    </section>
-  );
-}
-
-function ItemList({
-  items,
-  selectedItem,
-  onSelect
-}: {
-  items: Item[];
-  selectedItem: Item | null;
-  onSelect: (item: Item) => void;
-}) {
-  return (
-    <section className="panel list-panel">
-      <div className="panel-heading">
-        <ShoppingBag size={20} />
-        <h2>商品一覧</h2>
       </div>
-      <div className="item-list">
-        {items.map((item) => (
-          <button key={item.id} className={selectedItem?.id === item.id ? "item-row active" : "item-row"} onClick={() => onSelect(item)}>
-            <img src={item.imageUrl || "/placeholder.svg"} alt="" />
-            <span>
-              <strong>{item.title}</strong>
-              <small>
-                ¥{item.price.toLocaleString()} / {item.status}
-              </small>
-            </span>
+
+      <section className="panel form-panel">
+        <div className="panel-heading">
+          <PackagePlus size={20} />
+          <h3>商品情報を入力</h3>
+        </div>
+        <form onSubmit={submit}>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="商品名" />
+          <div className="two-col">
+            <input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="カテゴリ" />
+            <input value={price} onChange={(e) => setPrice(Number(e.target.value))} type="number" placeholder="価格" />
+          </div>
+          <input value={condition} onChange={(e) => setCondition(e.target.value)} placeholder="状態" />
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="AIに渡すメモ" />
+          <button className="ai-button" disabled={loadingAI} type="button" onClick={generateDescription}>
+            <Sparkles size={18} />
+            {loadingAI ? "生成中" : "Geminiで説明生成"}
           </button>
-        ))}
-        {items.length === 0 && <p className="muted">まだ商品がありません。</p>}
-      </div>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="商品説明" />
+          <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="画像URL" />
+          <button className="primary-button" disabled={!description} type="submit">
+            <ShoppingBag size={18} />
+            出品する
+          </button>
+        </form>
+      </section>
     </section>
   );
 }
 
-function ItemDetail({
+function ItemDetailScreen({
   item,
   user,
   api,
+  onBack,
   onChanged,
   onNotice,
   onConversationCreated
@@ -336,20 +598,27 @@ function ItemDetail({
   item: Item | null;
   user: User | null;
   api: <T>(path: string, options?: RequestInit) => Promise<T>;
-  onChanged: () => Promise<void>;
+  onBack: () => void;
+  onChanged: (itemId: number) => void;
   onNotice: (message: string) => void;
-  onConversationCreated: () => Promise<void>;
+  onConversationCreated: (conversationId: number) => Promise<void>;
 }) {
   const [question, setQuestion] = useState("通勤用として雨の日にも使えそう？");
   const [answer, setAnswer] = useState("");
 
   if (!item) {
     return (
-      <section className="panel detail-panel">
-        <p className="muted">商品を選択してください。</p>
+      <section className="page-shell">
+        <section className="panel detail-panel">
+          <p className="muted">商品が見つかりませんでした。</p>
+          <button className="ghost-button" onClick={onBack}>
+            ホームへ戻る
+          </button>
+        </section>
       </section>
     );
   }
+
   const currentItem = item;
 
   async function askAI() {
@@ -362,13 +631,14 @@ function ItemDetail({
 
   async function like() {
     await api(`/items/${currentItem.id}/like`, { method: "POST" });
-    await onChanged();
+    onNotice("いいねしました");
+    onChanged(currentItem.id);
   }
 
   async function purchase() {
     await api(`/items/${currentItem.id}/purchase`, { method: "POST" });
-    await onChanged();
     onNotice("購入が完了しました");
+    onChanged(currentItem.id);
   }
 
   async function messageSeller() {
@@ -376,63 +646,88 @@ function ItemDetail({
       method: "POST",
       body: JSON.stringify({ itemId: currentItem.id, sellerId: currentItem.sellerId })
     });
-    await onConversationCreated();
     onNotice(`会話を作成しました: #${data.conversationId}`);
+    await onConversationCreated(data.conversationId);
   }
 
   return (
-    <section className="panel detail-panel">
-      <img className="hero-image" src={currentItem.imageUrl || "/placeholder.svg"} alt="" />
-      <div className="detail-title">
+    <section className="page-shell">
+      <div className="split-heading">
         <div>
-          <p className="eyebrow">{currentItem.category}</p>
-          <h2>{currentItem.title}</h2>
+          <p className="eyebrow">Item Detail</p>
+          <h2>{item.title}</h2>
+          <p className="muted">{item.sellerName} さんの出品</p>
         </div>
-        <strong>¥{currentItem.price.toLocaleString()}</strong>
-      </div>
-      <p>{currentItem.description}</p>
-      <div className="detail-actions">
-        <button disabled={!user} onClick={like}>
-          <Heart size={18} />
-          {currentItem.likeCount}
-        </button>
-        <button disabled={!user || currentItem.status !== "active"} onClick={messageSeller}>
-          <MessageCircle size={18} />
-          DM
-        </button>
-        <button disabled={!user || currentItem.status !== "active"} onClick={purchase}>
-          <WalletCards size={18} />
-          購入
+        <button className="ghost-button" onClick={onBack}>
+          <Home size={18} />
+          ホームへ戻る
         </button>
       </div>
-      <div className="ai-ask">
-        <textarea disabled={!user} value={question} onChange={(e) => setQuestion(e.target.value)} />
-        <button className="ai-button" disabled={!user} onClick={askAI}>
-          <Bot size={18} />
-          AIに質問
-        </button>
-        {answer && <p className="ai-answer">{answer}</p>}
-      </div>
+
+      <section className="detail-layout">
+        <article className="panel media-panel">
+          <img className="hero-image" src={item.imageUrl || "/placeholder.svg"} alt="" />
+        </article>
+
+        <article className="panel detail-panel">
+          <div className="detail-title">
+            <div>
+              <p className="eyebrow">{item.category}</p>
+              <h3>{item.title}</h3>
+            </div>
+            <strong>¥{item.price.toLocaleString()}</strong>
+          </div>
+          <p className="item-description">{item.description}</p>
+          <div className="detail-actions">
+            <button onClick={like}>
+              <Heart size={18} />
+              {item.likeCount}
+            </button>
+            <button disabled={!user || item.status !== "active"} onClick={messageSeller}>
+              <MessageCircle size={18} />
+              DMする
+            </button>
+            <button disabled={!user || item.status !== "active"} onClick={purchase}>
+              <WalletCards size={18} />
+              購入する
+            </button>
+          </div>
+          <div className="status-chip">{item.status === "active" ? "販売中" : "売却済み"}</div>
+        </article>
+
+        <article className="panel ai-panel">
+          <div className="panel-heading">
+            <Bot size={20} />
+            <h3>AIに質問</h3>
+          </div>
+          <div className="ai-ask">
+            <textarea value={question} onChange={(e) => setQuestion(e.target.value)} />
+            <button className="ai-button" onClick={askAI}>
+              <Bot size={18} />
+              AIに質問
+            </button>
+            {answer && <p className="ai-answer">{answer}</p>}
+          </div>
+        </article>
+      </section>
     </section>
   );
 }
 
-function MessagesPanel({
+function MessagesScreen({
   user,
   conversations,
   selectedConversation,
   messages,
   api,
-  onSelect,
-  onSent
+  onSelect
 }: {
   user: User | null;
   conversations: Conversation[];
   selectedConversation: Conversation | null;
   messages: Message[];
   api: <T>(path: string, options?: RequestInit) => Promise<T>;
-  onSelect: (conversation: Conversation) => Promise<void>;
-  onSent: (conversation: Conversation) => void;
+  onSelect: (conversationId: number) => void;
 }) {
   const [body, setBody] = useState("購入前に状態をもう少し教えてください。");
 
@@ -444,42 +739,149 @@ function MessagesPanel({
       body: JSON.stringify({ body })
     });
     setBody("");
-    onSent(selectedConversation);
+    onSelect(selectedConversation.id);
   }
 
   return (
-    <section className="panel messages-panel">
-      <div className="panel-heading">
-        <MessageCircle size={20} />
-        <h2>DM</h2>
+    <section className="page-shell">
+      <div className="split-heading">
+        <div>
+          <p className="eyebrow">Messages</p>
+          <h2>DMページ</h2>
+          <p className="muted">詳細ページから作成した会話を、ここでまとめて管理します。</p>
+        </div>
       </div>
-      <div className="conversation-list">
-        {conversations.map((conversation) => (
-          <button
-            key={conversation.id}
-            className={selectedConversation?.id === conversation.id ? "conversation active" : "conversation"}
-            onClick={() => void onSelect(conversation)}
-          >
-            {conversation.itemTitle}
-          </button>
-        ))}
-        {conversations.length === 0 && <p className="muted">会話はまだありません。</p>}
-      </div>
-      <div className="message-list">
-        {messages.map((message) => (
-          <p key={message.id} className={message.senderId === user?.id ? "message mine" : "message"}>
-            {message.body}
-          </p>
-        ))}
-      </div>
-      <form className="message-form" onSubmit={send}>
-        <input disabled={!selectedConversation} value={body} onChange={(e) => setBody(e.target.value)} />
-        <button disabled={!selectedConversation}>
-          <Send size={18} />
-        </button>
-      </form>
+
+      <section className="message-layout">
+        <article className="panel conversation-panel">
+          <div className="panel-heading">
+            <MessageCircle size={20} />
+            <h3>会話一覧</h3>
+          </div>
+          <div className="conversation-list">
+            {conversations.map((conversation) => (
+              <button
+                key={conversation.id}
+                className={selectedConversation?.id === conversation.id ? "conversation active" : "conversation"}
+                onClick={() => onSelect(conversation.id)}
+              >
+                <strong>{conversation.itemTitle}</strong>
+                <small>更新: {formatDate(conversation.updatedAt)}</small>
+              </button>
+            ))}
+            {conversations.length === 0 && <p className="muted">会話はまだありません。</p>}
+          </div>
+        </article>
+
+        <article className="panel thread-panel">
+          <div className="panel-heading">
+            <Send size={20} />
+            <h3>{selectedConversation ? selectedConversation.itemTitle : "メッセージ"}</h3>
+          </div>
+          <div className="message-list">
+            {messages.map((message) => (
+              <p key={message.id} className={message.senderId === user?.id ? "message mine" : "message"}>
+                {message.body}
+              </p>
+            ))}
+            {selectedConversation && messages.length === 0 && <p className="muted">まだメッセージはありません。</p>}
+            {!selectedConversation && <p className="muted">左の会話を選択してください。</p>}
+          </div>
+          <form className="message-form" onSubmit={send}>
+            <input disabled={!selectedConversation} value={body} onChange={(e) => setBody(e.target.value)} />
+            <button disabled={!selectedConversation}>
+              <Send size={18} />
+            </button>
+          </form>
+        </article>
+      </section>
     </section>
   );
+}
+
+function MyPageScreen({
+  user,
+  myItems,
+  onOpenSell,
+  onOpenItem
+}: {
+  user: User | null;
+  myItems: Item[];
+  onOpenSell: () => void;
+  onOpenItem: (itemId: number) => void;
+}) {
+  return (
+    <section className="page-shell">
+      <div className="split-heading">
+        <div>
+          <p className="eyebrow">My Page</p>
+          <h2>{user?.name} さんのマイページ</h2>
+          <p className="muted">自分の出品状況を確認し、必要ならそのまま新規出品へ移れます。</p>
+        </div>
+        <button className="primary-button" onClick={onOpenSell}>
+          <PackagePlus size={18} />
+          新しく出品
+        </button>
+      </div>
+
+      <section className="panel mypage-panel">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">My Listings</p>
+            <h3>あなたの出品</h3>
+          </div>
+        </div>
+        <div className="card-grid compact-grid">
+          {myItems.map((item) => (
+            <button key={item.id} className="catalog-card compact" onClick={() => onOpenItem(item.id)}>
+              <img src={item.imageUrl || "/placeholder.svg"} alt="" />
+              <div>
+                <strong>{item.title}</strong>
+                <span>¥{item.price.toLocaleString()}</span>
+                <small>{item.status}</small>
+              </div>
+            </button>
+          ))}
+          {myItems.length === 0 && <p className="muted">まだ出品がありません。最初の1品を登録しましょう。</p>}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function readRoute(): Route {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (hash === "sell") return { page: "sell" };
+  if (hash === "messages") return { page: "messages" };
+  if (hash === "mypage") return { page: "mypage" };
+  if (hash.startsWith("item/")) {
+    const itemId = Number(hash.split("/")[1]);
+    if (Number.isFinite(itemId)) {
+      return { page: "item", itemId };
+    }
+  }
+  if (hash === "home") return { page: "home" };
+  return { page: "auth" };
+}
+
+function normalizeRoute(route: Route, authenticated: boolean): Route {
+  if (!authenticated) return { page: "auth" };
+  return route.page === "auth" ? { page: "home" } : route;
+}
+
+function navigate(route: Route) {
+  const hash =
+    route.page === "item"
+      ? `item/${route.itemId}`
+      : route.page === "home"
+        ? "home"
+        : route.page;
+  window.location.hash = hash;
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
 }
 
 function loadUser() {

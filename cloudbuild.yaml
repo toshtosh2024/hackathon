@@ -1,0 +1,13 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - $_IMAGE
+      - -f
+      - backend/Dockerfile
+      - backend
+substitutions:
+  _IMAGE: gcr.io/$PROJECT_ID/backend:$COMMIT_SHA
+images:
+  - $_IMAGE
