@@ -161,6 +161,7 @@ func main() {
 	mux.HandleFunc("POST /api/profile", a.requireAuth(a.updateProfile))
 	mux.HandleFunc("GET /api/items", a.listItems)
 	mux.HandleFunc("GET /api/my/items", a.requireAuth(a.listMyItems))
+	mux.HandleFunc("GET /api/my/stats", a.requireAuth(a.getMyStats))
 	mux.HandleFunc("POST /api/items", a.requireAuth(a.createItem))
 	mux.HandleFunc("POST /api/upload", a.requireAuth(a.createUploadURL))
 	mux.HandleFunc("GET /api/items/{id}/ai-scene", a.requireAuth(a.getLatestItemScene))
@@ -2733,4 +2734,117 @@ func formatHistory(history []map[string]any) string {
 		lines = append(lines, fmt.Sprintf("%d. %s: 「%s」（提示価格：%d円、アクション：%s）", i+1, m["speaker"], m["text"], m["price"], m["action"]))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// Personal Analytics Handlers
+
+type personalStatsSummary struct {
+	TotalSales   int64 `json:"totalSales"`
+	TotalRevenue int64 `json:"totalRevenue"`
+	ActiveItems  int64 `json:"activeItems"`
+	TotalLikes   int64 `json:"totalLikes"`
+}
+
+type personalStatsResponse struct {
+	Summary              personalStatsSummary `json:"summary"`
+	CategoryDistribution []categoryStat       `json:"categoryDistribution"`
+	DailyRevenue         []dailyTransaction   `json:"dailyRevenue"`
+}
+
+func (a *app) getMyStats(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	db := a.dbHandle()
+	if db == nil {
+		writeError(w, http.StatusServiceUnavailable, "database unavailable")
+		return
+	}
+
+	var totalSales, totalRevenue, activeItems, totalLikes int64
+
+	// Total Sales & Total Revenue
+	err := db.QueryRowContext(r.Context(), "SELECT COUNT(*), COALESCE(SUM(price), 0) FROM purchases WHERE seller_id = ?", u.ID).Scan(&totalSales, &totalRevenue)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query sales stats: "+err.Error())
+		return
+	}
+
+	// Active Items count
+	err = db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM items WHERE seller_id = ? AND status = 'active'", u.ID).Scan(&activeItems)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query active items: "+err.Error())
+		return
+	}
+
+	// Total Likes received
+	err = db.QueryRowContext(r.Context(), `
+		SELECT COUNT(*) 
+		FROM likes l 
+		JOIN items i ON l.item_id = i.id 
+		WHERE i.seller_id = ?`, u.ID,
+	).Scan(&totalLikes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query likes count: "+err.Error())
+		return
+	}
+
+	// Category Distribution for this user's items
+	rowsCat, err := db.QueryContext(r.Context(), `
+		SELECT category, COUNT(*), COALESCE(SUM(price), 0)
+		FROM items
+		WHERE seller_id = ?
+		GROUP BY category
+		ORDER BY COUNT(*) DESC
+	`, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query category stats: "+err.Error())
+		return
+	}
+	defer rowsCat.Close()
+
+	categoryDistribution := []categoryStat{}
+	for rowsCat.Next() {
+		var cs categoryStat
+		if err := rowsCat.Scan(&cs.Category, &cs.ItemCount, &cs.TotalValue); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to scan category stats")
+			return
+		}
+		categoryDistribution = append(categoryDistribution, cs)
+	}
+
+	// Daily Revenue trend (Last 30 days) for this user's sold items
+	rowsTx, err := db.QueryContext(r.Context(), `
+		SELECT DATE_FORMAT(created_at, '%Y-%m-%d') as dt, COUNT(*), COALESCE(SUM(price), 0)
+		FROM purchases
+		WHERE seller_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+		GROUP BY dt
+		ORDER BY dt ASC
+	`, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query sales trend: "+err.Error())
+		return
+	}
+	defer rowsTx.Close()
+
+	dailyRevenue := []dailyTransaction{}
+	for rowsTx.Next() {
+		var dt dailyTransaction
+		if err := rowsTx.Scan(&dt.Date, &dt.TxCount, &dt.Revenue); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to scan daily transactions")
+			return
+		}
+		dailyRevenue = append(dailyRevenue, dt)
+	}
+
+	res := personalStatsResponse{
+		Summary: personalStatsSummary{
+			TotalSales:   totalSales,
+			TotalRevenue: totalRevenue,
+			ActiveItems:  activeItems,
+			TotalLikes:   totalLikes,
+		},
+		CategoryDistribution: categoryDistribution,
+		DailyRevenue:         dailyRevenue,
+	}
+
+	writeJSON(w, http.StatusOK, res)
 }

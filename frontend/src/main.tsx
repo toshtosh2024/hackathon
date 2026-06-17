@@ -1380,6 +1380,17 @@ function ReviewComposer({
   );
 }
 
+interface PersonalStats {
+  summary: {
+    totalSales: number;
+    totalRevenue: number;
+    activeItems: number;
+    totalLikes: number;
+  };
+  categoryDistribution: { category: string; itemCount: number; totalValue: number }[];
+  dailyRevenue: { date: string; txCount: number; revenue: number }[];
+}
+
 function MyPageScreen({
   user,
   myItems,
@@ -1399,6 +1410,27 @@ function MyPageScreen({
 }) {
   const [uploading, setUploading] = useState(false);
   const [profileError, setProfileError] = useState("");
+
+  const [activeTab, setActiveTab] = useState<"listings" | "dashboard">("listings");
+  const [stats, setStats] = useState<PersonalStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState("");
+
+  useEffect(() => {
+    if (activeTab === "dashboard" && !stats) {
+      setStatsLoading(true);
+      setStatsError("");
+      api<PersonalStats>("/my/stats")
+        .then((data) => {
+          setStats(data);
+          setStatsError("");
+        })
+        .catch((err) => {
+          setStatsError(err instanceof Error ? err.message : "個人分析データの取得に失敗しました");
+        })
+        .finally(() => setStatsLoading(false));
+    }
+  }, [activeTab]);
 
   async function uploadAvatar(file: File | null) {
     if (!file || !user) return;
@@ -1451,48 +1483,165 @@ function MyPageScreen({
       </div>
 
       <section className="panel mypage-panel">
-        <div className="profile-panel">
-          <img className="profile-avatar" src={user?.avatarUrl || "/placeholder-avatar.svg"} alt="" />
-          <div className="profile-copy">
-            <strong>{user?.name ?? "ユーザー"}</strong>
-            <small>{user?.email ?? ""}</small>
+        <div className="profile-panel" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "16px", width: "100%" }}>
+            <img className="profile-avatar" src={user?.avatarUrl || "/placeholder-avatar.svg"} alt="" />
+            <div className="profile-copy">
+              <strong>{user?.name ?? "ユーザー"}</strong>
+              <small>{user?.email ?? ""}</small>
+            </div>
+            <label className="upload-drop compact-upload" style={{ marginLeft: "auto" }}>
+              <UploadCloud size={18} />
+              <span>{uploading ? "更新中" : "写真を変更"}</span>
+              <input accept="image/*" disabled={uploading} type="file" onChange={(e) => void uploadAvatar(e.target.files?.[0] ?? null)} />
+            </label>
           </div>
-          <label className="upload-drop compact-upload">
-            <UploadCloud size={18} />
-            <span>{uploading ? "更新中" : "写真を変更"}</span>
-            <input accept="image/*" disabled={uploading} type="file" onChange={(e) => void uploadAvatar(e.target.files?.[0] ?? null)} />
-          </label>
+
+          {user?.role === "admin" && (
+            <button className="primary-button" style={{ background: "#d85b46", color: "#fff", display: "flex", alignItems: "center", gap: "8px", padding: "10px 18px", borderRadius: "8px", marginTop: "12px", fontSize: "14px", fontWeight: 600, border: "none", cursor: "pointer", width: "100%", justifyContent: "center" }} onClick={() => navigate({ page: "admin", subpage: "stats" })}>
+              <ShieldAlert size={16} /> 🛡️ システム管理者ダッシュボードを開く
+            </button>
+          )}
         </div>
         {profileError && <p className="error">{profileError}</p>}
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">My Listings</p>
-            <h3>あなたの出品</h3>
-          </div>
+
+        {/* Tab Controls */}
+        <div style={{ display: "flex", borderBottom: "2px solid #eadfd3", gap: "16px", margin: "24px 0 16px 0" }}>
+          <button
+            className={`tab-link ${activeTab === "listings" ? "active" : ""}`}
+            onClick={() => setActiveTab("listings")}
+            style={{ background: "none", border: "none", padding: "10px 16px", fontWeight: 600, fontSize: "15px", color: activeTab === "listings" ? "#d85b46" : "#5c6b73", borderBottom: activeTab === "listings" ? "3px solid #d85b46" : "3px solid transparent", cursor: "pointer" }}
+          >
+            あなたの出品 ({myItems.length})
+          </button>
+          <button
+            className={`tab-link ${activeTab === "dashboard" ? "active" : ""}`}
+            onClick={() => setActiveTab("dashboard")}
+            style={{ background: "none", border: "none", padding: "10px 16px", fontWeight: 600, fontSize: "15px", color: activeTab === "dashboard" ? "#d85b46" : "#5c6b73", borderBottom: activeTab === "dashboard" ? "3px solid #d85b46" : "3px solid transparent", cursor: "pointer" }}
+          >
+            <TrendingUp size={16} style={{ marginRight: "4px", verticalAlign: "middle" }} /> マイ・ダッシュボード (個人分析)
+          </button>
         </div>
-        <div className="card-grid compact-grid">
-          {myItems.map((item) => (
-            <article key={item.id} className="catalog-card compact my-item-card">
-              <img src={item.imageUrl || "/placeholder.svg"} alt="" />
+
+        {activeTab === "listings" ? (
+          <>
+            <div className="section-head">
               <div>
-                <strong>{item.title}</strong>
-                <span>¥{item.price.toLocaleString()}</span>
-                <small>{statusLabel(item.status)}</small>
+                <p className="eyebrow">My Listings</p>
+                <h3>出品した商品</h3>
               </div>
-              <div className="my-item-actions">
-                <button className="ghost-button" onClick={() => onOpenItem(item.id)}>
-                  詳細
-                </button>
-                {item.status === "active" && (
-                  <button className="ghost-button danger-button" onClick={() => void cancelItem(item.id)}>
-                    取り下げ
-                  </button>
-                )}
+            </div>
+            <div className="card-grid compact-grid">
+              {myItems.map((item) => (
+                <article key={item.id} className="catalog-card compact my-item-card">
+                  <img src={item.imageUrl || "/placeholder.svg"} alt="" />
+                  <div>
+                    <strong>{item.title}</strong>
+                    <span>¥{item.price.toLocaleString()}</span>
+                    <small>{statusLabel(item.status)}</small>
+                  </div>
+                  <div className="my-item-actions">
+                    <button className="ghost-button" onClick={() => onOpenItem(item.id)}>
+                      詳細
+                    </button>
+                    {item.status === "active" && (
+                      <button className="ghost-button danger-button" onClick={() => void cancelItem(item.id)}>
+                        取り下げ
+                      </button>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {myItems.length === 0 && <p className="muted">まだ出品がありません。最初の1品を登録しましょう。</p>}
+            </div>
+          </>
+        ) : (
+          <div className="personal-dashboard">
+            {statsLoading ? (
+              <div className="loading-state">分析データを集計中...</div>
+            ) : statsError ? (
+              <p className="error">{statsError}</p>
+            ) : !stats ? (
+              <p className="muted">データがありません</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+                {/* Summary Cards */}
+                <div className="stats-cards-grid" style={{ marginBottom: 0 }}>
+                  <div className="stat-card">
+                    <h3>獲得売上総額</h3>
+                    <p className="stat-number primary">¥ {(stats.summary?.totalRevenue || 0).toLocaleString()}</p>
+                  </div>
+                  <div className="stat-card">
+                    <h3>販売成立件数</h3>
+                    <p className="stat-number">{(stats.summary?.totalSales || 0).toLocaleString()} 件</p>
+                  </div>
+                  <div className="stat-card">
+                    <h3>出品中の商品数</h3>
+                    <p className="stat-number">{(stats.summary?.activeItems || 0).toLocaleString()} 点</p>
+                  </div>
+                  <div className="stat-card">
+                    <h3>獲得いいね総数</h3>
+                    <p className="stat-number">{(stats.summary?.totalLikes || 0).toLocaleString()} 回</p>
+                  </div>
+                </div>
+
+                <div className="stats-charts-grid">
+                  {/* Category Share */}
+                  <div className="chart-container">
+                    <h3>カテゴリー別出品割合</h3>
+                    <div className="chart-list">
+                      {(!stats.categoryDistribution || stats.categoryDistribution.length === 0) ? (
+                        <p className="empty-text">データがありません</p>
+                      ) : (
+                        stats.categoryDistribution.map((item) => {
+                          const maxCount = Math.max(...stats.categoryDistribution.map((c) => c.itemCount), 1);
+                          const pct = Math.round((item.itemCount / maxCount) * 100);
+                          return (
+                            <div key={item.category} className="chart-bar-row">
+                              <div className="chart-bar-label">
+                                <span>{item.category}</span>
+                                <small>{item.itemCount} 点 (¥{item.totalValue.toLocaleString()})</small>
+                              </div>
+                              <div className="chart-bar-bg">
+                                <div className="chart-bar-fill" style={{ width: `${pct}%`, background: "#d85b46" }}></div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Sales trend */}
+                  <div className="chart-container">
+                    <h3>日別売上推移 (直近30日)</h3>
+                    <div className="chart-list max-h-300">
+                      {(!stats.dailyRevenue || stats.dailyRevenue.length === 0) ? (
+                        <p className="empty-text">販売実績がまだありません</p>
+                      ) : (
+                        stats.dailyRevenue.map((item) => {
+                          const maxRev = Math.max(...stats.dailyRevenue.map((d) => d.revenue), 1);
+                          const pct = Math.round((item.revenue / maxRev) * 100);
+                          return (
+                            <div key={item.date} className="chart-bar-row">
+                              <div className="chart-bar-label">
+                                <span>{item.date} ({item.txCount} 件)</span>
+                                <strong>¥ {item.revenue.toLocaleString()}</strong>
+                              </div>
+                              <div className="chart-bar-bg">
+                                <div className="chart-bar-fill" style={{ width: `${pct}%`, background: "#47a8bd" }}></div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </article>
-          ))}
-          {myItems.length === 0 && <p className="muted">まだ出品がありません。最初の1品を登録しましょう。</p>}
-        </div>
+            )}
+          </div>
+        )}
       </section>
     </section>
   );
