@@ -330,3 +330,17 @@ func TestRequireAdminMiddleware(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatHistory(t *testing.T) {
+	history := []map[string]any{
+		{"speaker": "buyer", "text": "2200円になりますか？", "price": 2200, "action": "offer"},
+		{"speaker": "seller", "text": "2500円ならいいですよ", "price": 2500, "action": "offer"},
+	}
+	got := formatHistory(history)
+	if !strings.Contains(got, "buyer: 「2200円になりますか？」") {
+		t.Fatalf("unexpected format result: %q", got)
+	}
+	if !strings.Contains(got, "seller: 「2500円ならいいですよ」") {
+		t.Fatalf("unexpected format result: %q", got)
+	}
+}

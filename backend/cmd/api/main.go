@@ -65,6 +65,8 @@ type item struct {
 	Description       string    `json:"description"`
 	Category          string    `json:"category"`
 	Price             int       `json:"price"`
+	MinPrice          int       `json:"minPrice"`
+	AIPersonality     string    `json:"aiPersonality"`
 	Status            string    `json:"status"`
 	ImageURL          string    `json:"imageUrl"`
 	LikeCount         int       `json:"likeCount"`
@@ -176,8 +178,10 @@ func main() {
 	mux.HandleFunc("POST /api/conversations/{id}/messages", a.requireAuth(a.createMessage))
 	mux.HandleFunc("POST /api/ai/generate-description", a.requireAuth(a.generateDescription))
 	mux.HandleFunc("POST /api/ai/ask", a.requireAuth(a.askAI))
-	mux.HandleFunc("POST /api/ai/check-item", a.requireAuth(a.checkItem))
 	mux.HandleFunc("POST /api/ai/suggest-price", a.requireAuth(a.suggestPrice))
+
+	// Negotiation Routes
+	mux.HandleFunc("POST /api/items/{id}/negotiate", a.requireAuth(a.negotiateItem))
 
 	// Admin Dashboard Routes
 	mux.HandleFunc("GET /api/admin/stats", a.requireAdmin(a.getAdminStats))
@@ -695,11 +699,13 @@ func (a *app) getItem(w http.ResponseWriter, r *http.Request) {
 func (a *app) createItem(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	var req struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		Category    string `json:"category"`
-		Price       int    `json:"price"`
-		ImageURL    string `json:"imageUrl"`
+		Title         string `json:"title"`
+		Description   string `json:"description"`
+		Category      string `json:"category"`
+		Price         int    `json:"price"`
+		MinPrice      int    `json:"minPrice"`
+		AIPersonality string `json:"aiPersonality"`
+		ImageURL      string `json:"imageUrl"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -708,6 +714,17 @@ func (a *app) createItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title, description, category, and positive price are required")
 		return
 	}
+	if req.MinPrice <= 0 {
+		req.MinPrice = req.Price
+	}
+	if req.MinPrice > req.Price {
+		writeError(w, http.StatusBadRequest, "minimum price cannot exceed original price")
+		return
+	}
+	if req.AIPersonality == "" {
+		req.AIPersonality = "standard"
+	}
+
 	review, err := a.reviewItem(r.Context(), req.Title, req.Description, req.Category, "")
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
@@ -726,11 +743,11 @@ func (a *app) createItem(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	res, err := tx.ExecContext(r.Context(),
-		"INSERT INTO items (seller_id, title, description, category, price) VALUES (?, ?, ?, ?, ?)",
-		u.ID, req.Title, req.Description, req.Category, req.Price,
+		"INSERT INTO items (seller_id, title, description, category, price, min_price, ai_personality) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		u.ID, req.Title, req.Description, req.Category, req.Price, req.MinPrice, req.AIPersonality,
 	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create item")
+		writeError(w, http.StatusInternalServerError, "failed to create item: "+err.Error())
 		return
 	}
 	itemID, _ := res.LastInsertId()
@@ -1287,13 +1304,13 @@ func (a *app) findItem(ctx context.Context, id int64) (item, error) {
 		SELECT i.id, i.seller_id, u.name,
 		       COALESCE((SELECT AVG(rating) FROM user_reviews WHERE reviewee_id = i.seller_id), 0),
 		       (SELECT COUNT(*) FROM user_reviews WHERE reviewee_id = i.seller_id),
-		       i.title, i.description, i.category, i.price, i.status,
+		       i.title, i.description, i.category, i.price, i.min_price, i.ai_personality, i.status,
 		       COALESCE((SELECT image_url FROM item_images WHERE item_id = i.id ORDER BY sort_order LIMIT 1), ''),
 		       (SELECT COUNT(*) FROM likes WHERE item_id = i.id), i.created_at
 		FROM items i
 		JOIN users u ON u.id = i.seller_id
 		WHERE i.id = ?`, id,
-	).Scan(&it.ID, &it.SellerID, &it.SellerName, &it.SellerRatingAvg, &it.SellerReviewCount, &it.Title, &it.Description, &it.Category, &it.Price, &it.Status, &it.ImageURL, &it.LikeCount, &it.CreatedAt)
+	).Scan(&it.ID, &it.SellerID, &it.SellerName, &it.SellerRatingAvg, &it.SellerReviewCount, &it.Title, &it.Description, &it.Category, &it.Price, &it.MinPrice, &it.AIPersonality, &it.Status, &it.ImageURL, &it.LikeCount, &it.CreatedAt)
 	return it, err
 }
 
@@ -1697,7 +1714,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := ensureColumn(ctx, db, "users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url TEXT NULL AFTER role"); err != nil {
 		return err
 	}
-	return ensureTable(ctx, db, `CREATE TABLE IF NOT EXISTS item_scene_generations (
+	if err := ensureTable(ctx, db, `CREATE TABLE IF NOT EXISTS item_scene_generations (
 		id BIGINT PRIMARY KEY AUTO_INCREMENT,
 		user_id BIGINT NOT NULL,
 		item_id BIGINT NOT NULL,
@@ -1707,6 +1724,30 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		INDEX idx_item_scene_generations_user_item_created_at (user_id, item_id, created_at),
 		CONSTRAINT fk_item_scene_generations_user FOREIGN KEY (user_id) REFERENCES users(id),
 		CONSTRAINT fk_item_scene_generations_item FOREIGN KEY (item_id) REFERENCES items(id)
+	)`); err != nil {
+		return err
+	}
+
+	if err := ensureColumn(ctx, db, "items", "min_price", "ALTER TABLE items ADD COLUMN min_price INT NOT NULL DEFAULT 0 AFTER price"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "items", "ai_personality", "ALTER TABLE items ADD COLUMN ai_personality VARCHAR(50) NOT NULL DEFAULT 'standard' AFTER min_price"); err != nil {
+		return err
+	}
+	return ensureTable(ctx, db, `CREATE TABLE IF NOT EXISTS negotiations (
+		id BIGINT PRIMARY KEY AUTO_INCREMENT,
+		item_id BIGINT NOT NULL,
+		buyer_id BIGINT NOT NULL,
+		seller_id BIGINT NOT NULL,
+		buyer_budget INT NOT NULL,
+		desire_level VARCHAR(20) NOT NULL,
+		agreed_price INT NOT NULL,
+		status VARCHAR(30) NOT NULL DEFAULT 'pending',
+		negotiation_log TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		CONSTRAINT fk_negotiations_item FOREIGN KEY (item_id) REFERENCES items(id),
+		CONSTRAINT fk_negotiations_buyer FOREIGN KEY (buyer_id) REFERENCES users(id),
+		CONSTRAINT fk_negotiations_seller FOREIGN KEY (seller_id) REFERENCES users(id)
 	)`)
 }
 
@@ -2476,4 +2517,220 @@ func (a *app) updateUserRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"user": u})
+}
+
+// Negotiation Handlers and Helper Functions
+
+func (a *app) negotiateItem(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	itemID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	it, err := a.findItem(r.Context(), itemID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "item not found")
+		return
+	}
+
+	if it.Status != "active" {
+		writeError(w, http.StatusConflict, "item is not active")
+		return
+	}
+
+	if it.SellerID == u.ID {
+		writeError(w, http.StatusBadRequest, "you cannot negotiate for your own item")
+		return
+	}
+
+	var req struct {
+		BuyerBudget int    `json:"buyerBudget"`
+		DesireLevel string `json:"desireLevel"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	if req.BuyerBudget <= 0 {
+		writeError(w, http.StatusBadRequest, "valid buyer budget is required")
+		return
+	}
+	if req.DesireLevel != "low" && req.DesireLevel != "medium" && req.DesireLevel != "high" {
+		req.DesireLevel = "medium"
+	}
+
+	// 6-turn loop of back-and-forth LLM-driven negotiation
+	var history []map[string]any
+	var agreedPrice int
+	var status = "failed"
+
+	for turn := 1; turn <= 6; turn++ {
+		var prompt string
+		var speaker string
+		if turn%2 == 1 {
+			speaker = "buyer"
+			prompt = fmt.Sprintf(`あなたは購入者の代理交渉AIエージェントです。性格は「標準（丁寧）」です。
+現在の取引対象：
+商品名: "%s"
+出品価格: %d円
+
+あなたの交渉設定：
+希望購入予算: %d円
+欲しい度（購入意欲）: %s (low/medium/high)
+
+ルール：
+1. 予算内での購入を目指しますが、欲しい度が「high」の場合は予算の1.1倍まで、それ以外は予算の1.05倍まで引き上げを許容します。
+2. これまでの交渉履歴は以下の通りです：
+%s
+
+これまでの履歴を踏まえ、キャラクターを演じて次のターンに発言してください。
+もし相手（出品者）の最後の提示価格が、あなたの許容範囲内（許容上限以下）であれば、アクションを "accept" にし、その価格を受け入れてください。相手が不当に高額であったり、絶対に予算に近づく余地がなければ、アクションを "reject" にしてください。
+それ以外（さらに値引きを要求する場合）はアクション "offer" にし、新たな希望価格を提示してください（価格は元の出品価格%d円未満、かつ希望予算を考慮して決定）。
+※発言（message）はキャラクターの口調で1〜2文の日本語にしてください。
+※価格は100円単位などのきりの良い数値にしてください。
+
+必ず以下のJSONフォーマットのみで出力してください：
+{"message": "発言内容", "action": "offer"|"accept"|"reject", "price": 提示価格}`,
+				it.Title, it.Price, req.BuyerBudget, req.DesireLevel, formatHistory(history), it.Price,
+			)
+		} else {
+			speaker = "seller"
+			prompt = fmt.Sprintf(`あなたは出品者の代理交渉AIエージェントです。
+現在の取引対象：
+商品名: "%s"
+出品価格: %d円
+
+あなたの交渉設定：
+最低売却許容価格（秘密）: %d円 (この価格未満での販売は絶対に拒否しなければなりません)
+あなたの性格: %s (standard/osaka/cool/anime)
+・standard: 丁寧で誠実な標準キャラクター
+・osaka: コテコテの大阪の商人。値引きには柔軟だが、損は絶対しない。「〜やん」「〜やわ」など。
+・cool: 冷静沈着で合理的なエリートビジネスパーソン。データや論理で対応。
+・anime: 元気いっぱいで愛嬌のあるかわいいアニメキャラクター。「〜なのだ！」「〜だよ！」など。
+
+これまでの交渉履歴は以下の通りです：
+%s
+
+これまでの履歴を踏まえ、キャラクターの個性を100%%表現して次のターンに発言してください。
+もし相手（購入者）の最後の提示価格が、あなたの最低売却許容価格（%d円）以上であり納得できるなら、アクションを "accept" にし、取引を成立させてください。相手があなたの最低許容価格を大幅に下回る提示を続けたり、これ以上譲歩できない場合は "reject" にしてください。
+それ以外（こちらの希望価格をカウンターオファーする場合）は "offer" にし、新たな希望価格を提示してください。
+※発言（message）はキャラクターの口調で1〜2文の日本語にしてください。
+※価格は最低売却許容価格%d円未満にしてはなりません。
+
+必ず以下のJSONフォーマットのみで出力してください：
+{"message": "発言内容", "action": "offer"|"accept"|"reject", "price": 提示価格}`,
+				it.Title, it.Price, it.MinPrice, it.AIPersonality, formatHistory(history), it.MinPrice, it.MinPrice,
+			)
+		}
+
+		var res agentResponse
+		err := a.callOpenAIJSON(r.Context(), prompt, &res)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "AI交渉シミュレーション中にOpenAIでエラーが発生しました: "+err.Error())
+			return
+		}
+
+		// Normalize and clean action/price
+		action := strings.ToLower(strings.TrimSpace(res.Action))
+		if action != "accept" && action != "reject" {
+			action = "offer"
+		}
+		price := res.Price
+		if price <= 0 {
+			price = it.Price
+		}
+
+		// Append to history
+		history = append(history, map[string]any{
+			"speaker": speaker,
+			"text":    res.Message,
+			"price":   price,
+			"action":  action,
+		})
+
+		if action == "accept" {
+			status = "completed"
+			agreedPrice = price
+			break
+		}
+		if action == "reject" {
+			status = "failed"
+			break
+		}
+	}
+
+	historyJSON, _ := json.Marshal(history)
+
+	var purchaseID int64
+	if status == "completed" {
+		// Finalize purchase in a transaction!
+		tx, err := a.dbHandle().BeginTx(r.Context(), nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "取引開始に失敗しました")
+			return
+		}
+		defer tx.Rollback()
+
+		// Double-check item is still active
+		var currentStatus string
+		err = tx.QueryRowContext(r.Context(), "SELECT status FROM items WHERE id = ? FOR UPDATE", itemID).Scan(&currentStatus)
+		if err != nil || currentStatus != "active" {
+			writeError(w, http.StatusConflict, "商品は既に取引中か、売却済みです")
+			return
+		}
+
+		// Update item status
+		if _, err := tx.ExecContext(r.Context(), "UPDATE items SET status = 'sold' WHERE id = ?", itemID); err != nil {
+			writeError(w, http.StatusInternalServerError, "商品のステータス更新に失敗しました")
+			return
+		}
+
+		// Create purchase
+		pRes, err := tx.ExecContext(r.Context(),
+			"INSERT INTO purchases (item_id, buyer_id, seller_id, price) VALUES (?, ?, ?, ?)",
+			itemID, u.ID, it.SellerID, agreedPrice,
+		)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "取引レコードの作成に失敗しました")
+			return
+		}
+		purchaseID, _ = pRes.LastInsertId()
+
+		// Commit
+		if err := tx.Commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, "取引コミットに失敗しました")
+			return
+		}
+	}
+
+	// Insert negotiation record
+	_, _ = a.dbHandle().ExecContext(r.Context(),
+		"INSERT INTO negotiations (item_id, buyer_id, seller_id, buyer_budget, desire_level, agreed_price, status, negotiation_log) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		itemID, u.ID, it.SellerID, req.BuyerBudget, req.DesireLevel, agreedPrice, status, string(historyJSON),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":      status,
+		"agreedPrice": agreedPrice,
+		"purchaseId":  purchaseID,
+		"dialogue":    history,
+	})
+}
+
+type agentResponse struct {
+	Message string `json:"message"`
+	Action  string `json:"action"`
+	Price   int    `json:"price"`
+}
+
+func formatHistory(history []map[string]any) string {
+	if len(history) == 0 {
+		return "（交渉履歴なし、これが最初のターンです）"
+	}
+	var lines []string
+	for i, m := range history {
+		lines = append(lines, fmt.Sprintf("%d. %s: 「%s」（提示価格：%d円、アクション：%s）", i+1, m["speaker"], m["text"], m["price"], m["action"]))
+	}
+	return strings.Join(lines, "\n")
 }

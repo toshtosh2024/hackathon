@@ -46,6 +46,8 @@ type Item = {
   description: string;
   category: string;
   price: number;
+  minPrice?: number;
+  aiPersonality?: string;
   status: "active" | "sold" | "hidden";
   imageUrl: string;
   likeCount: number;
@@ -637,6 +639,8 @@ function CreateItemScreen({
   const [notes, setNotes] = useState("軽い。内ポケットあり。通勤にも旅行にも使える。");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState(4800);
+  const [minPrice, setMinPrice] = useState(3000);
+  const [aiPersonality, setAiPersonality] = useState("osaka");
   const [imageUrl, setImageUrl] = useState("https://images.unsplash.com/photo-1594223274512-ad4803739b7c?auto=format&fit=crop&w=900&q=80");
   const [loadingAI, setLoadingAI] = useState(false);
   const [loadingPrice, setLoadingPrice] = useState(false);
@@ -682,6 +686,7 @@ function CreateItemScreen({
       });
       setPriceSuggestion(data.suggestion);
       setPrice(data.suggestion.price);
+      setMinPrice(data.suggestion.minPrice || Math.round(data.suggestion.price * 0.7));
     } catch (err) {
       setAIError(err instanceof Error ? err.message : "価格提案に失敗しました");
     } finally {
@@ -715,7 +720,7 @@ function CreateItemScreen({
     try {
       const data = await api<{ item: Item }>("/items", {
         method: "POST",
-        body: JSON.stringify({ title, category, description, price, imageUrl })
+        body: JSON.stringify({ title, category, description, price, minPrice, aiPersonality, imageUrl })
       });
       onCreated(data.item);
     } catch (err) {
@@ -770,6 +775,21 @@ function CreateItemScreen({
           <div className="two-col">
             <input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="カテゴリ" />
             <input value={price} onChange={(e) => setPrice(Number(e.target.value))} type="number" placeholder="価格" />
+          </div>
+          <div className="two-col">
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <small style={{ color: "#7d8b99", fontWeight: 600 }}>最低売却許容価格 (非公開)</small>
+              <input value={minPrice} onChange={(e) => setMinPrice(Number(e.target.value))} type="number" placeholder="最低売却許容価格" style={{ width: "100%" }} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <small style={{ color: "#7d8b99", fontWeight: 600 }}>交渉AIの性格人格</small>
+              <select value={aiPersonality} onChange={(e) => setAiPersonality(e.target.value)} className="admin-role-select w-full" style={{ padding: "10px 14px", borderRadius: "8px", border: "1px solid #eadfd3", background: "#fffdf9", height: "46px" }}>
+                <option value="standard">標準・丁寧</option>
+                <option value="osaka">コテコテの大阪商人</option>
+                <option value="cool">冷静沈着エリートビジネスパーソン</option>
+                <option value="anime">元気でかわいいアニメキャラクター</option>
+              </select>
+            </div>
           </div>
           <input value={condition} onChange={(e) => setCondition(e.target.value)} placeholder="状態" />
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="AIに渡すメモ" />
@@ -859,6 +879,20 @@ function ItemDetailScreen({
   const [scene, setScene] = useState<ItemScene | null>(null);
   const [sceneLoading, setSceneLoading] = useState(false);
   const [sceneError, setSceneError] = useState("");
+
+  // Negotiation Modal States
+  const [showNegotiation, setShowNegotiation] = useState(false);
+  const [buyerBudget, setBuyerBudget] = useState(item ? Math.round(item.price * 0.8) : 0);
+  const [desireLevel, setDesireLevel] = useState<"low" | "medium" | "high">("medium");
+  const [negotiating, setNegotiating] = useState(false);
+  const [negotiationResult, setNegotiationResult] = useState<{
+    status: string;
+    agreedPrice: number;
+    purchaseId: number;
+    dialogue: { speaker: "buyer" | "seller"; text: string; price: number; action: string }[];
+  } | null>(null);
+  const [dialogueIndex, setDialogueIndex] = useState(0);
+  const [negError, setNegError] = useState("");
 
   if (!item) {
     return (
@@ -958,6 +992,45 @@ function ItemDetailScreen({
     }
   }
 
+  const startNegotiation = async () => {
+    setNegotiating(true);
+    setNegError("");
+    setNegotiationResult(null);
+    setDialogueIndex(0);
+    try {
+      const data = await api<{
+        status: string;
+        agreedPrice: number;
+        purchaseId: number;
+        dialogue: any[];
+      }>(`/items/${currentItem.id}/negotiate`, {
+        method: "POST",
+        body: JSON.stringify({ buyerBudget, desireLevel }),
+      });
+      setNegotiationResult(data);
+      // Start sequential reveal
+      let index = 0;
+      const interval = setInterval(() => {
+        index++;
+        if (index <= data.dialogue.length) {
+          setDialogueIndex(index);
+        } else {
+          clearInterval(interval);
+          setNegotiating(false);
+          if (data.status === "completed") {
+            onNotice("AI価格交渉が成立し、自動購入されました！");
+            onChanged(currentItem.id);
+          } else {
+            onNotice("価格交渉は決裂しました。");
+          }
+        }
+      }, 1500); // 1.5 seconds per bubble
+    } catch (err) {
+      setNegError(err instanceof Error ? err.message : "交渉に失敗しました");
+      setNegotiating(false);
+    }
+  };
+
   return (
     <section className="page-shell">
       <div className="split-heading">
@@ -1004,9 +1077,14 @@ function ItemDetailScreen({
                 <IconLabel icon={CircleOff} label={cancelling ? "取消中" : "取消"} />
               </button>
             ) : (
-              <button disabled={!user || item.status !== "active"} onClick={purchase}>
-                <IconLabel icon={WalletCards} label="購入" />
-              </button>
+              <>
+                <button disabled={!user || item.status !== "active"} onClick={purchase}>
+                  <IconLabel icon={WalletCards} label="通常購入" />
+                </button>
+                <button className="primary-button" style={{ background: '#d85b46', color: '#fff' }} disabled={!user || item.status !== "active"} onClick={() => setShowNegotiation(true)}>
+                  <IconLabel icon={Sparkles} label="AI交渉購入" />
+                </button>
+              </>
             )}
           </div>
           <div className="status-chip">{statusLabel(item.status)}</div>
@@ -1047,6 +1125,94 @@ function ItemDetailScreen({
           </div>
         </article>
       </section>
+
+      {showNegotiation && (
+        <div className="negotiation-modal-backdrop" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
+          <div className="negotiation-modal-content" style={{ background: '#fffdf9', borderRadius: '12px', border: '2px solid #eadfd3', padding: '24px', width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eadfd3', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Sparkles size={20} style={{ color: '#d85b46' }} />
+                <h3 style={{ margin: 0, color: '#1f2933' }}>AI代理価格交渉（エージェント・フリマ）</h3>
+              </div>
+              <button className="ghost-button" onClick={() => { setShowNegotiation(false); setNegotiationResult(null); }} style={{ padding: '4px' }}>✕</button>
+            </div>
+
+            {!negotiationResult && !negotiating ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <p style={{ margin: 0, color: '#5c6b73', fontSize: '14px', lineHeight: '1.5' }}>
+                  「希望予算」と「欲しい度」を設定して、あなたの代理AIエージェントに値下げ交渉を任せましょう。<br />
+                  出品者側の代理AI（性格：<strong>{item.aiPersonality === "osaka" ? "コテコテの大阪商人" : item.aiPersonality === "cool" ? "冷静沈着エリート" : item.aiPersonality === "anime" ? "元気でかわいいアニメキャラ" : "標準・丁寧"}</strong>）と自律的にチャット交渉を行い、合意すれば自動で購入が確定します！
+                </p>
+                <div className="two-col" style={{ display: 'grid', gap: '16px', gridTemplateColumns: '1fr 1fr' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 600, color: '#1f2933' }}>希望購入価格（予算）</label>
+                    <input value={buyerBudget} onChange={(e) => setBuyerBudget(Number(e.target.value))} type="number" style={{ width: '100%' }} />
+                    <small style={{ color: '#7d8b99' }}>出品価格: ¥{item.price.toLocaleString()}</small>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 600, color: '#1f2933' }}>どうしても欲しい度</label>
+                    <select value={desireLevel} onChange={(e) => setDesireLevel(e.target.value as any)} style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid #eadfd3', background: '#ffffff', height: '46px' }}>
+                      <option value="high">絶対欲しい！（予算の1.1倍まで出せる）</option>
+                      <option value="medium">普通に欲しい（予算の1.05倍まで許容）</option>
+                      <option value="low">安ければ欲しい（予算ぴったりまで）</option>
+                    </select>
+                  </div>
+                </div>
+                {negError && <p className="error" style={{ margin: 0 }}>{negError}</p>}
+                <button className="primary-button" onClick={startNegotiation} style={{ background: '#d85b46', color: '#ffffff', width: '100%' }}>
+                  <Bot size={18} /> 交渉エージェントを起動して交渉開始！
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ background: '#eef2f5', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '200px', maxHeight: '400px', overflowY: 'auto' }}>
+                  {negotiating && dialogueIndex === 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '180px', flexDirection: 'column', gap: '8px' }}>
+                      <div className="updating-spinner" style={{ fontSize: '24px' }}>🤖 ⚔️ 🤖</div>
+                      <p style={{ margin: 0, color: '#5c6b73', fontSize: '14px' }}>AIエージェント同士が極秘価格交渉室で対話中...</p>
+                    </div>
+                  )}
+
+                  {Array.from({ length: dialogueIndex }).map((_, i) => {
+                    const msg = negotiationResult?.dialogue[i];
+                    if (!msg) return null;
+                    const isBuyer = msg.speaker === "buyer";
+                    return (
+                      <div key={i} style={{ display: 'flex', flexDirection: 'column', alignSelf: isBuyer ? 'flex-start' : 'flex-end', alignItems: isBuyer ? 'flex-start' : 'flex-end', maxWidth: '85%' }}>
+                        <small style={{ color: '#7d8b99', fontSize: '11px', marginBottom: '2px' }}>
+                          {isBuyer ? "あなた(購入者)の代理AI" : `出品者の代理AI (${item.aiPersonality === "osaka" ? "大阪商人" : item.aiPersonality === "cool" ? "冷徹エリート" : item.aiPersonality === "anime" ? "元気なアニメキャラ" : "標準"})`}
+                        </small>
+                        <div style={{ background: isBuyer ? '#ffefe9' : '#e3f3ff', border: isBuyer ? '1px solid #ffccb8' : '1px solid #b3dcff', borderRadius: '8px', padding: '10px 14px', fontSize: '14px', color: '#1f2933', position: 'relative' }}>
+                          {msg.text}
+                          <div style={{ fontSize: '11px', color: '#7d8b99', marginTop: '6px', textAlign: 'right', fontWeight: 600 }}>
+                            {msg.action === "accept" ? "🎉 妥結・合意！" : msg.action === "reject" ? "❌ 決裂" : `提示価格: ¥${msg.price.toLocaleString()}`}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {negotiationResult && dialogueIndex >= negotiationResult.dialogue.length && (
+                  <div style={{ background: negotiationResult.status === "completed" ? "#e1f8eb" : "#f9dfd8", border: negotiationResult.status === "completed" ? "1px solid #1b8a5a" : "1px solid #9d372c", borderRadius: '8px', padding: '16px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <strong style={{ fontSize: '18px', color: negotiationResult.status === "completed" ? "#1b8a5a" : "#9d372c" }}>
+                      {negotiationResult.status === "completed" ? "🎉 交渉成立・自動購入完了！" : "❌ 交渉決裂..."}
+                    </strong>
+                    <p style={{ margin: 0, fontSize: '14px', color: '#1f2933' }}>
+                      {negotiationResult.status === "completed" ? (
+                        <>合意価格: <strong style={{ fontSize: '20px' }}>¥{negotiationResult.agreedPrice.toLocaleString()}</strong> で自動決済されました！</>
+                      ) : (
+                        "お互いの希望価格の折り合いがつきませんでした。"
+                      )}
+                    </p>
+                    <button className="ghost-button" onClick={() => { setShowNegotiation(false); setNegotiationResult(null); }} style={{ marginTop: '8px', background: '#ffffff', width: '100%' }}>閉じる</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
