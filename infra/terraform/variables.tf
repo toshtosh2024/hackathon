@@ -76,3 +76,15 @@ variable "enable_github_trigger" {
   type        = bool
   default     = false
 }
+
+variable "github_connection_name" {
+  description = "Cloud Build v2 GitHub connection name."
+  type        = string
+  default     = "tosh"
+}
+
+variable "github_connection_region" {
+  description = "Region of the Cloud Build v2 GitHub connection."
+  type        = string
+  default     = "us-central1"
+}

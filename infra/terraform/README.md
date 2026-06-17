@@ -35,7 +35,13 @@ cd ../..
 gcloud builds submit --project term9-toshiie-shiomi --config cloudbuild.yaml .
 ```
 
-`cloudbuild.yaml` also deploys the pushed image to Cloud Run. For automatic deploys on GitHub `main` pushes, connect `toshtosh2024/hackathon` to Cloud Build's GitHub app first, then set:
+`cloudbuild.yaml` also deploys the pushed image to Cloud Run. Automatic deploys on GitHub `main` pushes use the Cloud Build GitHub connection:
+
+- Connection: `tosh`
+- Connection region: `us-central1`
+- Provider account: `Tk-visionary`
+
+The provider account must have admin permission on `toshtosh2024/hackathon`. After the repository is linkable from the connection, enable the trigger with:
 
 ```hcl
 enable_github_trigger = true

@@ -7,6 +7,7 @@ locals {
   jwt_secret         = var.jwt_secret != "" ? var.jwt_secret : random_password.jwt_secret.result
   openai_secret_id   = "${var.app_name}-openai-api-key"
   cloud_build_sa     = "${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
+  github_connection  = "projects/${var.project_id}/locations/${var.github_connection_region}/connections/${var.github_connection_name}"
 }
 
 data "google_project" "current" {
@@ -349,16 +350,22 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   member   = "allUsers"
 }
 
+resource "google_cloudbuildv2_repository" "github" {
+  count             = var.enable_github_trigger ? 1 : 0
+  name              = var.github_repository
+  parent_connection = local.github_connection
+  remote_uri        = "https://github.com/${var.github_owner}/${var.github_repository}.git"
+}
+
 resource "google_cloudbuild_trigger" "github_main" {
   count       = var.enable_github_trigger ? 1 : 0
   name        = "${var.app_name}-github-main"
   description = "Build and deploy ${var.github_owner}/${var.github_repository} main branch to Cloud Run"
   filename    = "cloudbuild.yaml"
+  location    = var.github_connection_region
 
-  github {
-    owner = var.github_owner
-    name  = var.github_repository
-
+  repository_event_config {
+    repository = google_cloudbuildv2_repository.github[0].id
     push {
       branch = var.github_branch_regex
     }
@@ -377,5 +384,6 @@ resource "google_cloudbuild_trigger" "github_main" {
     google_project_iam_member.cloud_build_run_admin,
     google_service_account_iam_member.cloud_build_service_account_user,
     google_artifact_registry_repository_iam_member.cloud_build_artifact_writer,
+    google_cloudbuildv2_repository.github,
   ]
 }
