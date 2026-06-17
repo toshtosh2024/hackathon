@@ -1796,7 +1796,7 @@ func signedGCSUploadURL(prefix string, filename string, contentType string) (str
 	credentialScope := datestamp + "/auto/storage/goog4_request"
 	credential := clientEmail + "/" + credentialScope
 	expires := "900"
-	escapedObject := "/" + escapeObjectPath(objectName)
+	canonicalURI := gcsPathStyleURI(bucket, objectName)
 
 	query := url.Values{}
 	query.Set("X-Goog-Algorithm", "GOOG4-RSA-SHA256")
@@ -1807,7 +1807,7 @@ func signedGCSUploadURL(prefix string, filename string, contentType string) (str
 
 	canonicalRequest := strings.Join([]string{
 		http.MethodPut,
-		escapedObject,
+		canonicalURI,
 		query.Encode(),
 		"content-type:" + contentType + "\n" + "host:storage.googleapis.com\n",
 		"content-type;host",
@@ -1827,8 +1827,8 @@ func signedGCSUploadURL(prefix string, filename string, contentType string) (str
 	}
 	query.Set("X-Goog-Signature", hex.EncodeToString(signatureBytes))
 
-	publicURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucket, escapeObjectPath(objectName))
-	uploadURL := fmt.Sprintf("https://storage.googleapis.com/%s%s?%s", bucket, escapedObject, query.Encode())
+	publicURL := gcsPathStyleURL(bucket, objectName)
+	uploadURL := publicURL + "?" + query.Encode()
 	return uploadURL, publicURL, "gcs://" + bucket + "/" + objectName, nil
 }
 
@@ -1962,6 +1962,14 @@ func escapeObjectPath(objectName string) string {
 	return strings.Join(parts, "/")
 }
 
+func gcsPathStyleURI(bucket string, objectName string) string {
+	return "/" + url.PathEscape(bucket) + "/" + escapeObjectPath(objectName)
+}
+
+func gcsPathStyleURL(bucket string, objectName string) string {
+	return "https://storage.googleapis.com" + gcsPathStyleURI(bucket, objectName)
+}
+
 func assetViewURL(ref string) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -2002,7 +2010,7 @@ func signedGCSReadURL(ref string, ttl time.Duration) (string, error) {
 	timestamp := now.Format("20060102T150405Z")
 	credentialScope := datestamp + "/auto/storage/goog4_request"
 	credential := clientEmail + "/" + credentialScope
-	escapedObject := "/" + escapeObjectPath(objectName)
+	canonicalURI := gcsPathStyleURI(bucket, objectName)
 	query := url.Values{}
 	query.Set("X-Goog-Algorithm", "GOOG4-RSA-SHA256")
 	query.Set("X-Goog-Credential", credential)
@@ -2012,7 +2020,7 @@ func signedGCSReadURL(ref string, ttl time.Duration) (string, error) {
 
 	canonicalRequest := strings.Join([]string{
 		http.MethodGet,
-		escapedObject,
+		canonicalURI,
 		query.Encode(),
 		"host:storage.googleapis.com\n",
 		"host",
@@ -2031,7 +2039,7 @@ func signedGCSReadURL(ref string, ttl time.Duration) (string, error) {
 		return "", err
 	}
 	query.Set("X-Goog-Signature", hex.EncodeToString(signatureBytes))
-	return fmt.Sprintf("https://storage.googleapis.com/%s%s?%s", bucket, escapedObject, query.Encode()), nil
+	return gcsPathStyleURL(bucket, objectName) + "?" + query.Encode(), nil
 }
 
 func parseGCSRef(ref string) (string, string, error) {

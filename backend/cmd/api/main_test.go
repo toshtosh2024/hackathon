@@ -170,6 +170,14 @@ func TestParseGCSRef(t *testing.T) {
 	}
 }
 
+func TestGCSPathStyleURIIncludesBucket(t *testing.T) {
+	got := gcsPathStyleURI("nextmarket-images", "items/sample bag.jpg")
+	want := "/nextmarket-images/items/sample%20bag.jpg"
+	if got != want {
+		t.Fatalf("gcsPathStyleURI = %q, want %q", got, want)
+	}
+}
+
 func TestAssetViewURLKeepsPublicHTTPURL(t *testing.T) {
 	got := assetViewURL("https://storage.googleapis.com/example/items/sample.jpg")
 	if got != "https://storage.googleapis.com/example/items/sample.jpg" {
