@@ -28,8 +28,8 @@ type app struct {
 	db            *sql.DB
 	dbMu          sync.RWMutex
 	jwtSecret     string
-	geminiKey     string
-	geminiModel   string
+	openAIKey     string
+	openAIModel   string
 	allowedOrigin string
 }
 
@@ -77,8 +77,8 @@ func main() {
 	_ = godotenv.Load()
 	a := &app{
 		jwtSecret:     env("JWT_SECRET", "dev-secret"),
-		geminiKey:     os.Getenv("GEMINI_API_KEY"),
-		geminiModel:   env("GEMINI_MODEL", "gemini-2.5-flash"),
+		openAIKey:     strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
+		openAIModel:   env("OPENAI_MODEL", "gpt-4o-mini"),
 		allowedOrigin: env("ALLOWED_ORIGIN", "http://localhost:5173"),
 	}
 	go a.initDBLoop()
@@ -638,7 +638,7 @@ func (a *app) generateDescription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prompt := fmt.Sprintf("フリマアプリの商品説明を日本語で作成してください。誇張せず、状態を正直に書いてください。\n商品名: %s\nカテゴリ: %s\n状態: %s\nメモ: %s", req.Title, req.Category, req.Condition, req.Notes)
-	text, err := a.callGemini(r.Context(), prompt)
+	text, err := a.callOpenAI(r.Context(), prompt)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -662,7 +662,7 @@ func (a *app) askAI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prompt := fmt.Sprintf("あなたはフリマアプリの購入相談AIです。商品情報だけを根拠に、短く実用的に回答して。答えのみを端的に出力して。「承知しました」みたいな文言は一切いらない。\n商品名: %s\nカテゴリ: %s\n価格: %d円\n説明: %s\n質問: %s", it.Title, it.Category, it.Price, it.Description, req.Question)
-	text, err := a.callGemini(r.Context(), prompt)
+	text, err := a.callOpenAI(r.Context(), prompt)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -691,22 +691,24 @@ func (a *app) saveAI(ctx context.Context, userID int64, itemID *int64, kind stri
 	)
 }
 
-func (a *app) callGemini(ctx context.Context, prompt string) (string, error) {
-	if a.geminiKey == "" {
-		return "", errors.New("GEMINI_API_KEY is not set")
+func (a *app) callOpenAI(ctx context.Context, prompt string) (string, error) {
+	if a.openAIKey == "" {
+		return "", errors.New("OPENAI_API_KEY is not set")
 	}
 	body := map[string]any{
-		"contents": []map[string]any{
-			{"parts": []map[string]string{{"text": prompt}}},
+		"model": a.openAIModel,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
 		},
+		"temperature": 0.4,
 	}
 	payload, _ := json.Marshal(body)
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", a.geminiModel, a.geminiKey)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.openAIKey)
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -715,25 +717,23 @@ func (a *app) callGemini(ctx context.Context, prompt string) (string, error) {
 	defer res.Body.Close()
 	resBody, _ := io.ReadAll(res.Body)
 	if res.StatusCode >= 300 {
-		return "", fmt.Errorf("gemini api error: %s", string(resBody))
+		return "", fmt.Errorf("openai api error: %s", string(resBody))
 	}
 
 	var parsed struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
 	if err := json.Unmarshal(resBody, &parsed); err != nil {
 		return "", err
 	}
-	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {
-		return "", errors.New("gemini returned empty response")
+	if len(parsed.Choices) == 0 || strings.TrimSpace(parsed.Choices[0].Message.Content) == "" {
+		return "", errors.New("openai returned empty response")
 	}
-	return strings.TrimSpace(parsed.Candidates[0].Content.Parts[0].Text), nil
+	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
 }
 
 func (a *app) requireAuth(next http.HandlerFunc) http.HandlerFunc {

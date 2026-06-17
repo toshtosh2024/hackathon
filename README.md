@@ -10,14 +10,14 @@
 Web開発
 * バックエンド: Go
 * フロントエンド: React
-* AI API: Google Gemini API
+* AI API: OpenAI API
 
 必須機能
 * ユーザー登録・認証: 基本的なユーザー管理機能
 * 商品出品: 商品情報入力
 * 商品購入: 購入フロー（決済API連携は不要）
 * DM機能: ユーザー間でのメッセージ交換
-* Gemini API連携: 商品説明の自動生成や質問応答機能
+* OpenAI API連携: 商品説明の自動生成や質問応答機能
 * デプロイ: Go APIがフロントエンド配信も兼ねる形でCloud Runへデプロイする。DBに関してはCloudSQLを用いる
 
 発展的な実装の例
@@ -65,7 +65,7 @@ Web開発
 * デモの完成度: Demo Dayの発表において、主要な機能が一通り動作し、プロダクトの魅力を伝えられる状態にあるか。
 テーマ性・独創性
 * テーマの体現: 「次世代フリマアプリ」というテーマをどう解釈し、プロダクトに落とし込んでいるか。
-* AIの活用価値: Gemini APIや独自モデルを効果的に活用し、既存のフリマアプリにはない新しいユーザー体験や価値を創出できているか。（例: 単なる商品説明生成だけでなく、価格交渉の補助、出品禁止物の検知など）
+* AIの活用価値: OpenAI APIや独自モデルを効果的に活用し、既存のフリマアプリにはない新しいユーザー体験や価値を創出できているか。（例: 単なる商品説明生成だけでなく、価格交渉の補助、出品禁止物の検知など）
 * アイデアの新規性: 他の作品にはない、ユニークで創造的なアイデアが盛り込まれているか。
 
 
@@ -111,7 +111,7 @@ TODO
 
 ## プロダクト方針
 
-Next Market は、Gemini APIを使って出品者の説明文作成と購入者の質問回答を支援する次世代フリマアプリです。
+Next Market は、OpenAI APIを使って出品者の説明文作成と購入者の質問回答を支援する次世代フリマアプリです。
 
 ## ディレクトリ
 
@@ -149,7 +149,7 @@ npm run dev
 
 - App: `backend/Dockerfile` で frontend をビルドして backend に同梱し、Cloud Runへデプロイ
 - DB: Cloud SQL for MySQLを作成し、Cloud Runには `DATABASE_DSN` か `DB_USER` `DB_PASS` `DB_NAME` `INSTANCE_UNIX_SOCKET` を設定
-- AI: Cloud Runの環境変数に `GEMINI_API_KEY` を設定
+- AI: Cloud Runの環境変数に `OPENAI_API_KEY` を設定
 
 ## Vercel なしで動かす
 

@@ -28,7 +28,7 @@ Register/Login
       -> Message seller
       -> Purchase
     -> Create item
-      -> Generate description with Gemini
+      -> Generate description with OpenAI
       -> Publish item
     -> Messages
       -> Select conversation
@@ -40,9 +40,9 @@ Register/Login
 1. Create a seller account.
 2. Open the create item screen.
 3. Enter item title, price, category, and short notes.
-4. Use Gemini to generate a better description.
+4. Use OpenAI to generate a better description.
 5. Publish the item.
 6. Log in as a buyer.
 7. Open the item detail screen.
-8. Ask Gemini a purchase question.
+8. Ask OpenAI a purchase question.
 9. Like the item, send a DM, then purchase it.

@@ -14,6 +14,6 @@ output "cloud_run_url" {
   value = google_cloud_run_v2_service.app.uri
 }
 
-output "gemini_secret" {
-  value = google_secret_manager_secret.gemini_api_key.secret_id
+output "openai_secret" {
+  value = data.google_secret_manager_secret.openai_api_key.secret_id
 }

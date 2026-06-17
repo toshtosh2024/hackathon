@@ -34,17 +34,10 @@ variable "image_tag" {
   default     = "latest"
 }
 
-variable "gemini_api_key" {
-  description = "Gemini API key. Leave empty to create an empty secret placeholder."
+variable "openai_model" {
+  description = "OpenAI model used by the application."
   type        = string
-  default     = ""
-  sensitive   = true
-}
-
-variable "gemini_model" {
-  description = "Gemini model used by the application."
-  type        = string
-  default     = "gemini-2.5-flash"
+  default     = "gpt-4o-mini"
 }
 
 variable "jwt_secret" {

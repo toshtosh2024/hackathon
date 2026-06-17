@@ -19,6 +19,15 @@ GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)" terraform apply \
   -target=google_artifact_registry_repository.app
 ```
 
+Create the OpenAI API key secret before the full Terraform apply:
+
+```bash
+printf '%s' 'YOUR_OPENAI_API_KEY' | gcloud secrets create next-market-openai-api-key \
+  --project term9-toshiie-shiomi \
+  --replication-policy=automatic \
+  --data-file=-
+```
+
 Build and push the container image:
 
 ```bash
@@ -34,10 +43,10 @@ GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)" terraform apply
 terraform output cloud_run_url
 ```
 
-To set or rotate the Gemini key after deployment:
+To rotate the OpenAI key after deployment:
 
 ```bash
-printf '%s' 'YOUR_GEMINI_API_KEY' | gcloud secrets versions add next-market-gemini-api-key \
+printf '%s' 'YOUR_OPENAI_API_KEY' | gcloud secrets versions add next-market-openai-api-key \
   --project term9-toshiie-shiomi \
   --data-file=-
 ```

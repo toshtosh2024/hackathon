@@ -86,8 +86,8 @@
 | user_id | BIGINT | FK users.id |
 | item_id | BIGINT | Nullable FK items.id |
 | kind | VARCHAR(40) | description/question/moderation |
-| prompt | TEXT | Prompt sent to Gemini |
-| result | TEXT | Gemini response |
+| prompt | TEXT | Prompt sent to OpenAI |
+| result | TEXT | OpenAI response |
 | created_at | DATETIME | Created time |
 
 ## Indexes

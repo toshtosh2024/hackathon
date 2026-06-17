@@ -21,7 +21,7 @@
 - [x] Purchase flow without payment integration.
 - [x] Direct messages between users.
 - [x] Likes.
-- [x] Gemini API integration for AI item description and Q&A.
+- [x] OpenAI API integration for AI item description and Q&A.
 
 ## Phase 4: Polish
 
@@ -40,7 +40,7 @@
 - Added `docs/api-spec.md` for auth, items, purchases, messages, and AI endpoints.
 - Created Go backend in `backend/`.
 - Added MySQL migration at `backend/migrations/001_init.sql`.
-- Implemented REST APIs for user registration, login, items, likes, purchases, conversations, messages, and Gemini AI calls.
+- Implemented REST APIs for user registration, login, items, likes, purchases, conversations, messages, and OpenAI calls.
 - Added `backend/Dockerfile` for Cloud Run deployment.
 - Added `backend/.env.example` for local and Cloud Run environment variables.
 - Created React frontend in `frontend/`.
@@ -56,6 +56,6 @@
 
 ## Remaining Notes
 
-- `GEMINI_API_KEY` must be set before AI generation works in the running backend.
+- `OPENAI_API_KEY` must be set before AI generation works in the running backend.
 - Basic tests are still TODO.
 - Demo script is still TODO.

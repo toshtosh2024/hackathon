@@ -521,7 +521,7 @@ function CreateItemScreen({
       });
       setDescription(data.description);
       if (!data.description.trim()) {
-        setAIError("Gemini から空の説明文が返されました");
+        setAIError("OpenAI から空の説明文が返されました");
       }
     } catch (err) {
       setAIError(err instanceof Error ? err.message : "説明文の生成に失敗しました");
@@ -566,7 +566,7 @@ function CreateItemScreen({
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="AIに渡すメモ" />
           <button className="ai-button" disabled={loadingAI} type="button" onClick={generateDescription}>
             <Sparkles size={18} />
-            {loadingAI ? "生成中" : "Geminiで説明生成"}
+            {loadingAI ? "生成中" : "OpenAIで説明生成"}
           </button>
           {aiError && <p className="error">{aiError}</p>}
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="商品説明" />
@@ -635,7 +635,7 @@ function ItemDetailScreen({
       });
       setAnswer(data.answer);
       if (!data.answer.trim()) {
-        setAIError("Gemini から回答が返されませんでした");
+        setAIError("OpenAI から回答が返されませんでした");
       }
     } catch (err) {
       setAIError(err instanceof Error ? err.message : "AIの回答取得に失敗しました");

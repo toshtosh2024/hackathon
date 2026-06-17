@@ -4,7 +4,7 @@ locals {
   service_name       = var.app_name
   image              = "${var.region}-docker.pkg.dev/${var.project_id}/${local.repository_id}/${var.app_name}:${var.image_tag}"
   jwt_secret         = var.jwt_secret != "" ? var.jwt_secret : random_password.jwt_secret.result
-  gemini_api_key     = var.gemini_api_key != "" ? var.gemini_api_key : "replace-me"
+  openai_secret_id   = "${var.app_name}-openai-api-key"
 }
 
 resource "google_project_service" "services" {
@@ -70,19 +70,8 @@ resource "google_secret_manager_secret_version" "jwt_secret" {
   secret_data = local.jwt_secret
 }
 
-resource "google_secret_manager_secret" "gemini_api_key" {
-  secret_id = "${var.app_name}-gemini-api-key"
-
-  replication {
-    auto {}
-  }
-
-  depends_on = [google_project_service.services]
-}
-
-resource "google_secret_manager_secret_version" "gemini_api_key" {
-  secret      = google_secret_manager_secret.gemini_api_key.id
-  secret_data = local.gemini_api_key
+data "google_secret_manager_secret" "openai_api_key" {
+  secret_id = local.openai_secret_id
 }
 
 resource "google_sql_database_instance" "mysql" {
@@ -147,8 +136,8 @@ resource "google_secret_manager_secret_iam_member" "cloud_run_jwt_secret" {
   member    = "serviceAccount:${google_service_account.cloud_run.email}"
 }
 
-resource "google_secret_manager_secret_iam_member" "cloud_run_gemini_api_key" {
-  secret_id = google_secret_manager_secret.gemini_api_key.secret_id
+resource "google_secret_manager_secret_iam_member" "cloud_run_openai_api_key" {
+  secret_id = data.google_secret_manager_secret.openai_api_key.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.cloud_run.email}"
 }
@@ -220,18 +209,18 @@ resource "google_cloud_run_v2_service" "app" {
       }
 
       env {
-        name = "GEMINI_API_KEY"
+        name = "OPENAI_API_KEY"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.gemini_api_key.secret_id
+            secret  = data.google_secret_manager_secret.openai_api_key.secret_id
             version = "latest"
           }
         }
       }
 
       env {
-        name  = "GEMINI_MODEL"
-        value = var.gemini_model
+        name  = "OPENAI_MODEL"
+        value = var.openai_model
       }
 
       resources {
@@ -253,7 +242,7 @@ resource "google_cloud_run_v2_service" "app" {
     google_project_iam_member.cloud_run_sql_client,
     google_secret_manager_secret_iam_member.cloud_run_db_password,
     google_secret_manager_secret_iam_member.cloud_run_jwt_secret,
-    google_secret_manager_secret_iam_member.cloud_run_gemini_api_key,
+    google_secret_manager_secret_iam_member.cloud_run_openai_api_key,
   ]
 }
 
