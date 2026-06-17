@@ -511,6 +511,62 @@ form {
   gap: 16px;
 }
 
+.filter-bar {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(120px, 0.8fr) repeat(2, minmax(110px, 0.6fr));
+}
+
+.search-field {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #ddd1c4;
+  border-radius: 18px;
+  display: flex;
+  gap: 8px;
+  padding: 0 13px;
+}
+
+.search-field input {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding-left: 0;
+}
+
+.upload-drop {
+  align-items: center;
+  background: #f8efe5;
+  border: 1px dashed #c9947f;
+  border-radius: 18px;
+  color: #24463a;
+  cursor: pointer;
+  display: flex;
+  font-weight: 700;
+  gap: 10px;
+  justify-content: center;
+  min-height: 64px;
+  padding: 14px;
+}
+
+.upload-drop input {
+  display: none;
+}
+
+.image-preview-row {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+
+.image-preview-row img {
+  aspect-ratio: 1 / 1;
+  border-radius: 18px;
+  object-fit: cover;
+  width: 100%;
+}
+
 .detail-title {
   align-items: start;
   justify-content: space-between;
@@ -752,6 +808,8 @@ form {
   .card-grid,
   .compact-grid,
   .detail-actions,
+  .filter-bar,
+  .image-preview-row,
   .two-col {
     grid-template-columns: 1fr;
   }

@@ -3,16 +3,23 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -89,6 +96,7 @@ func main() {
 	mux.HandleFunc("POST /api/auth/login", a.login)
 	mux.HandleFunc("GET /api/items", a.listItems)
 	mux.HandleFunc("POST /api/items", a.requireAuth(a.createItem))
+	mux.HandleFunc("POST /api/upload", a.requireAuth(a.createUploadURL))
 	mux.HandleFunc("GET /api/items/{id}", a.getItem)
 	mux.HandleFunc("POST /api/items/{id}/like", a.requireAuth(a.toggleLike))
 	mux.HandleFunc("POST /api/items/{id}/purchase", a.requireAuth(a.purchaseItem))
@@ -333,6 +341,41 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) listItems(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	minPrice, ok := optionalIntParam(w, r, "min_price")
+	if !ok {
+		return
+	}
+	maxPrice, ok := optionalIntParam(w, r, "max_price")
+	if !ok {
+		return
+	}
+	if minPrice != nil && maxPrice != nil && *minPrice > *maxPrice {
+		writeError(w, http.StatusBadRequest, "min_price must be less than or equal to max_price")
+		return
+	}
+
+	conditions := []string{"i.status IN ('active', 'sold')"}
+	args := []any{}
+	if query != "" {
+		conditions = append(conditions, "(i.title LIKE ? OR i.description LIKE ?)")
+		like := "%" + query + "%"
+		args = append(args, like, like)
+	}
+	if category != "" {
+		conditions = append(conditions, "i.category = ?")
+		args = append(args, category)
+	}
+	if minPrice != nil {
+		conditions = append(conditions, "i.price >= ?")
+		args = append(args, *minPrice)
+	}
+	if maxPrice != nil {
+		conditions = append(conditions, "i.price <= ?")
+		args = append(args, *maxPrice)
+	}
+
 	rows, err := a.dbHandle().QueryContext(r.Context(), `
 		SELECT i.id, i.seller_id, u.name, i.title, i.description, i.category, i.price, i.status,
 		       COALESCE((SELECT image_url FROM item_images WHERE item_id = i.id ORDER BY sort_order LIMIT 1), ''),
@@ -340,10 +383,10 @@ func (a *app) listItems(w http.ResponseWriter, r *http.Request) {
 		FROM items i
 		JOIN users u ON u.id = i.seller_id
 		LEFT JOIN likes l ON l.item_id = i.id
-		WHERE i.status IN ('active', 'sold')
+		WHERE `+strings.Join(conditions, " AND ")+`
 		GROUP BY i.id, i.seller_id, u.name, i.title, i.description, i.category, i.price, i.status, i.created_at
 		ORDER BY i.created_at DESC
-		LIMIT 50`)
+		LIMIT 50`, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load items")
 		return
@@ -364,6 +407,34 @@ func (a *app) listItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *app) createUploadURL(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Filename    string `json:"filename"`
+		ContentType string `json:"contentType"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	req.Filename = filepath.Base(strings.TrimSpace(req.Filename))
+	req.ContentType = strings.TrimSpace(req.ContentType)
+	if req.Filename == "." || req.Filename == "" || req.ContentType == "" || !strings.HasPrefix(req.ContentType, "image/") {
+		writeError(w, http.StatusBadRequest, "画像ファイルを選択してください")
+		return
+	}
+
+	signed, publicURL, err := signedGCSUploadURL(req.Filename, req.ContentType)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"uploadUrl":   signed,
+		"publicUrl":   publicURL,
+		"method":      http.MethodPut,
+		"contentType": req.ContentType,
+	})
 }
 
 func (a *app) getItem(w http.ResponseWriter, r *http.Request) {
@@ -840,6 +911,19 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+func optionalIntParam(w http.ResponseWriter, r *http.Request, key string) (*int, bool) {
+	value := strings.TrimSpace(r.URL.Query().Get(key))
+	if value == "" {
+		return nil, true
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
+		writeError(w, http.StatusBadRequest, key+" must be a non-negative integer")
+		return nil, false
+	}
+	return &parsed, true
+}
+
 func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -847,6 +931,96 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+func signedGCSUploadURL(filename string, contentType string) (string, string, error) {
+	bucket := strings.TrimSpace(os.Getenv("GCS_BUCKET"))
+	clientEmail := strings.TrimSpace(os.Getenv("GCS_CLIENT_EMAIL"))
+	privateKeyText := strings.TrimSpace(os.Getenv("GCS_PRIVATE_KEY"))
+	if bucket == "" || clientEmail == "" || privateKeyText == "" {
+		return "", "", errors.New("画像アップロード設定が未設定です: GCS_BUCKET, GCS_CLIENT_EMAIL, GCS_PRIVATE_KEY を設定してください")
+	}
+
+	privateKey, err := parseRSAPrivateKey(privateKeyText)
+	if err != nil {
+		return "", "", errors.New("GCS_PRIVATE_KEY を読み込めませんでした")
+	}
+
+	now := time.Now().UTC()
+	datestamp := now.Format("20060102")
+	timestamp := now.Format("20060102T150405Z")
+	objectName := fmt.Sprintf("items/%s-%s", now.Format("20060102150405"), sanitizeObjectName(filename))
+	credentialScope := datestamp + "/auto/storage/goog4_request"
+	credential := clientEmail + "/" + credentialScope
+	expires := "900"
+	escapedObject := "/" + escapeObjectPath(objectName)
+
+	query := url.Values{}
+	query.Set("X-Goog-Algorithm", "GOOG4-RSA-SHA256")
+	query.Set("X-Goog-Credential", credential)
+	query.Set("X-Goog-Date", timestamp)
+	query.Set("X-Goog-Expires", expires)
+	query.Set("X-Goog-SignedHeaders", "content-type;host")
+
+	canonicalRequest := strings.Join([]string{
+		http.MethodPut,
+		escapedObject,
+		query.Encode(),
+		"content-type:" + contentType + "\n" + "host:storage.googleapis.com\n",
+		"content-type;host",
+		"UNSIGNED-PAYLOAD",
+	}, "\n")
+	canonicalHash := sha256.Sum256([]byte(canonicalRequest))
+	stringToSign := strings.Join([]string{
+		"GOOG4-RSA-SHA256",
+		timestamp,
+		credentialScope,
+		hex.EncodeToString(canonicalHash[:]),
+	}, "\n")
+	signHash := sha256.Sum256([]byte(stringToSign))
+	signatureBytes, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, signHash[:])
+	if err != nil {
+		return "", "", errors.New("署名付きURLの発行に失敗しました")
+	}
+	query.Set("X-Goog-Signature", hex.EncodeToString(signatureBytes))
+
+	publicURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucket, escapeObjectPath(objectName))
+	uploadURL := fmt.Sprintf("https://storage.googleapis.com/%s%s?%s", bucket, escapedObject, query.Encode())
+	return uploadURL, publicURL, nil
+}
+
+func parseRSAPrivateKey(value string) (*rsa.PrivateKey, error) {
+	value = strings.ReplaceAll(value, `\n`, "\n")
+	block, _ := pem.Decode([]byte(value))
+	if block == nil {
+		return nil, errors.New("missing pem block")
+	}
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err == nil {
+		if rsaKey, ok := key.(*rsa.PrivateKey); ok {
+			return rsaKey, nil
+		}
+	}
+	return x509.ParsePKCS1PrivateKey(block.Bytes)
+}
+
+func sanitizeObjectName(filename string) string {
+	name := strings.ToLower(filename)
+	replacer := strings.NewReplacer(" ", "-", "/", "-", "\\", "-", ":", "-", "?", "-", "&", "-")
+	name = replacer.Replace(name)
+	name = strings.Trim(name, ".-")
+	if name == "" {
+		return "upload"
+	}
+	return name
+}
+
+func escapeObjectPath(objectName string) string {
+	parts := strings.Split(objectName, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
 }
 
 func base64JSON(v any) string {

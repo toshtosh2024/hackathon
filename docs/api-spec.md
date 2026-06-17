@@ -45,6 +45,13 @@ Request:
 
 ### GET /items
 
+Query:
+
+- `q`: title and description keyword
+- `category`: exact category
+- `min_price`: minimum price
+- `max_price`: maximum price
+
 Response:
 
 ```json
@@ -80,6 +87,32 @@ Request:
   "category": "fashion",
   "price": 7800,
   "imageUrl": ""
+}
+```
+
+### POST /upload
+
+Authorization: `Bearer <token>`
+
+Issues a Cloud Storage signed URL for direct image upload.
+
+Request:
+
+```json
+{
+  "filename": "bag.jpg",
+  "contentType": "image/jpeg"
+}
+```
+
+Response:
+
+```json
+{
+  "uploadUrl": "https://storage.googleapis.com/...",
+  "publicUrl": "https://storage.googleapis.com/nextmarket/items/...",
+  "method": "PUT",
+  "contentType": "image/jpeg"
 }
 ```
 

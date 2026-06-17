@@ -26,6 +26,8 @@
 ## Phase 4: Polish
 
 - [x] Improve UI/UX for demo flow.
+- [x] Add image upload flow with Cloud Storage signed URLs.
+- [x] Add item search and filters.
 - [ ] Add basic tests.
 - [x] Add README startup steps.
 - [ ] Prepare demo script.
@@ -53,6 +55,15 @@
 - Started local MySQL, backend, and frontend dev server.
 - Confirmed `GET /api/healthz` returns `{"status":"ok"}`.
 - Confirmed `POST /api/auth/register` creates a user in MySQL.
+
+### 2026-06-18
+
+- Added `POST /api/upload` to issue Cloud Storage signed URLs for direct image uploads.
+- Added `GCS_BUCKET`, `GCS_CLIENT_EMAIL`, and `GCS_PRIVATE_KEY` to backend environment examples.
+- Added keyword, category, and price-range filters to `GET /api/items`.
+- Updated the home screen with search/filter controls, loading state, and Japanese error messages.
+- Updated the sell screen with image file selection, upload progress, image preview, and submit error handling.
+- Updated `docs/api-spec.md` for item filters and upload URL issuance.
 
 ## Remaining Notes
 

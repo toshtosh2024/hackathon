@@ -9,10 +9,12 @@ import {
   LogOut,
   MessageCircle,
   PackagePlus,
+  Search,
   Send,
   ShoppingBag,
   Sparkles,
   Store,
+  UploadCloud,
   UserCircle2,
   WalletCards
 } from "lucide-react";
@@ -114,10 +116,13 @@ function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [notice, setNotice] = useState("");
+  const [itemFilters, setItemFilters] = useState({ q: "", category: "", minPrice: "", maxPrice: "" });
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsError, setItemsError] = useState("");
 
   useEffect(() => {
-    void loadItems();
-  }, []);
+    void loadItems(itemFilters);
+  }, [itemFilters]);
 
   useEffect(() => {
     if (!token) {
@@ -159,9 +164,23 @@ function App() {
     return data;
   }
 
-  async function loadItems() {
-    const data = await api<{ items: Item[] }>("/items");
-    setItems(data.items);
+  async function loadItems(filters = itemFilters) {
+    setItemsLoading(true);
+    setItemsError("");
+    const params = new URLSearchParams();
+    if (filters.q.trim()) params.set("q", filters.q.trim());
+    if (filters.category.trim()) params.set("category", filters.category.trim());
+    if (filters.minPrice.trim()) params.set("min_price", filters.minPrice.trim());
+    if (filters.maxPrice.trim()) params.set("max_price", filters.maxPrice.trim());
+    const query = params.toString();
+    try {
+      const data = await api<{ items: Item[] }>(`/items${query ? `?${query}` : ""}`);
+      setItems(data.items);
+    } catch (err) {
+      setItemsError(err instanceof Error ? err.message : "商品一覧の読み込みに失敗しました");
+    } finally {
+      setItemsLoading(false);
+    }
   }
 
   async function loadConversations() {
@@ -197,7 +216,7 @@ function App() {
   }
 
   async function refreshItemsAndKeepSelection(itemId?: number) {
-    await loadItems();
+    await loadItems(itemFilters);
     if (itemId) {
       navigate({ page: "item", itemId });
     }
@@ -229,9 +248,13 @@ function App() {
           {route.page === "home" && (
             <HomeScreen
               items={items}
+              filters={itemFilters}
+              loading={itemsLoading}
+              error={itemsError}
               activeCount={activeCount}
               soldCount={soldCount}
               likedTotal={likedTotal}
+              onFilterChange={setItemFilters}
               onOpenItem={(itemId) => navigate({ page: "item", itemId })}
               onOpenSell={() => navigate({ page: "sell" })}
               onOpenMessages={() => navigate({ page: "messages" })}
@@ -384,17 +407,25 @@ function Navigation({ route }: { route: Route }) {
 
 function HomeScreen({
   items,
+  filters,
+  loading,
+  error,
   activeCount,
   soldCount,
   likedTotal,
+  onFilterChange,
   onOpenItem,
   onOpenSell,
   onOpenMessages
 }: {
   items: Item[];
+  filters: { q: string; category: string; minPrice: string; maxPrice: string };
+  loading: boolean;
+  error: string;
   activeCount: number;
   soldCount: number;
   likedTotal: number;
+  onFilterChange: (filters: { q: string; category: string; minPrice: string; maxPrice: string }) => void;
   onOpenItem: (itemId: number) => void;
   onOpenSell: () => void;
   onOpenMessages: () => void;
@@ -450,6 +481,35 @@ function HomeScreen({
               <h3>新着アイテム</h3>
             </div>
           </div>
+          <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
+            <label className="search-field">
+              <Search size={18} />
+              <input
+                value={filters.q}
+                onChange={(e) => onFilterChange({ ...filters, q: e.target.value })}
+                placeholder="商品名・説明で検索"
+              />
+            </label>
+            <input
+              value={filters.category}
+              onChange={(e) => onFilterChange({ ...filters, category: e.target.value })}
+              placeholder="カテゴリ"
+            />
+            <input
+              value={filters.minPrice}
+              onChange={(e) => onFilterChange({ ...filters, minPrice: e.target.value })}
+              inputMode="numeric"
+              placeholder="最低価格"
+            />
+            <input
+              value={filters.maxPrice}
+              onChange={(e) => onFilterChange({ ...filters, maxPrice: e.target.value })}
+              inputMode="numeric"
+              placeholder="最高価格"
+            />
+          </form>
+          {loading && <p className="inline-notice">商品を読み込んでいます。</p>}
+          {error && <p className="error">{error}</p>}
           <div className="card-grid">
             {latestItems.map((item) => (
               <button key={item.id} className="catalog-card" onClick={() => onOpenItem(item.id)}>
@@ -510,6 +570,9 @@ function CreateItemScreen({
   const [imageUrl, setImageUrl] = useState("https://images.unsplash.com/photo-1594223274512-ad4803739b7c?auto=format&fit=crop&w=900&q=80");
   const [loadingAI, setLoadingAI] = useState(false);
   const [aiError, setAIError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [submitError, setSubmitError] = useState("");
 
   async function generateDescription() {
     setLoadingAI(true);
@@ -532,11 +595,41 @@ function CreateItemScreen({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const data = await api<{ item: Item }>("/items", {
-      method: "POST",
-      body: JSON.stringify({ title, category, description, price, imageUrl })
-    });
-    onCreated(data.item);
+    setSubmitError("");
+    try {
+      const data = await api<{ item: Item }>("/items", {
+        method: "POST",
+        body: JSON.stringify({ title, category, description, price, imageUrl })
+      });
+      onCreated(data.item);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "出品に失敗しました");
+    }
+  }
+
+  async function uploadImage(file: File | null) {
+    if (!file) return;
+    setUploading(true);
+    setUploadError("");
+    try {
+      const signed = await api<{ uploadUrl: string; publicUrl: string; contentType: string }>("/upload", {
+        method: "POST",
+        body: JSON.stringify({ filename: file.name, contentType: file.type })
+      });
+      const response = await fetch(signed.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": signed.contentType },
+        body: file
+      });
+      if (!response.ok) {
+        throw new Error("画像のアップロードに失敗しました");
+      }
+      setImageUrl(signed.publicUrl);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "画像のアップロードに失敗しました");
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -576,8 +669,20 @@ function CreateItemScreen({
               <MarkdownBlock className="preview-body" text={description} />
             </section>
           )}
-          <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="画像URL" />
-          <button className="primary-button" disabled={!description} type="submit">
+          <label className="upload-drop">
+            <UploadCloud size={22} />
+            <span>{uploading ? "アップロード中" : "画像を選択"}</span>
+            <input accept="image/*" disabled={uploading} type="file" onChange={(e) => void uploadImage(e.target.files?.[0] ?? null)} />
+          </label>
+          {uploadError && <p className="error">{uploadError}</p>}
+          {imageUrl && (
+            <div className="image-preview-row">
+              <img src={imageUrl} alt="" />
+              <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="画像URL" />
+            </div>
+          )}
+          {submitError && <p className="error">{submitError}</p>}
+          <button className="primary-button" disabled={!description || uploading} type="submit">
             <ShoppingBag size={18} />
             出品する
           </button>
