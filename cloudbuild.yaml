@@ -6,7 +6,7 @@ steps:
       - gcr.io/$PROJECT_ID/backend:$COMMIT_SHA
       - -f
       - backend/Dockerfile
-      - backend
+      - .
 images:
   - gcr.io/$PROJECT_ID/backend:$COMMIT_SHA
 options:
