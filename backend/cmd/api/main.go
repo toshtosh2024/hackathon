@@ -2621,6 +2621,7 @@ func (a *app) negotiateItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "item not found")
 		return
 	}
+	cleanTitle := cleanForPrompt(it.Title)
 
 	if it.Status != "active" {
 		writeError(w, http.StatusConflict, "item is not active")
@@ -2673,14 +2674,14 @@ func (a *app) negotiateItem(w http.ResponseWriter, r *http.Request) {
 %s
 
 これまでの履歴を踏まえ、キャラクターを演じて次のターンに発言してください。
-もし相手（出品者）の最後の提示価格が、あなたの許容範囲内（許容上限以下）であれば、アクションを "accept" にし、その価格を受け入れてください。相手が不当に高額であったり、絶対に予算に近づく余地がなければ、アクションを "reject" にしてください。
+もし相手（出品者）の最後の提示価格が、あなたの許容範囲内（許容上限以下）であれば、アクションを "accept" にし、その価格を受け入れてください。相手が不当に高額であったり、絶対に予算に近づく余地がなければ、アクション "reject" にしてください。
 それ以外（さらに値引きを要求する場合）はアクション "offer" にし、新たな希望価格を提示してください（価格は元の出品価格%d円未満、かつ希望予算を考慮して決定）。
 ※発言（message）はキャラクターの口調で1〜2文の日本語にしてください。
 ※価格は100円単位などのきりの良い数値にしてください。
 
 必ず以下のJSONフォーマットのみで出力してください：
 {"message": "発言内容", "action": "offer"|"accept"|"reject", "price": 提示価格}`,
-				it.Title, it.Price, req.BuyerBudget, req.DesireLevel, formatHistory(history), it.Price,
+				cleanTitle, it.Price, req.BuyerBudget, req.DesireLevel, formatHistory(history), it.Price,
 			)
 		} else {
 			speaker = "seller"
@@ -2692,7 +2693,7 @@ func (a *app) negotiateItem(w http.ResponseWriter, r *http.Request) {
 あなたの交渉設定：
 最低売却許容価格（秘密）: %d円 (この価格未満での販売は絶対に拒否しなければなりません)
 あなたの性格: %s (standard/osaka/cool/anime)
-・standard: 丁寧で誠実な標準キャラクター
+・standard: 丁寧で誠真な標準キャラクター
 ・osaka: コテコテの大阪の商人。値引きには柔軟だが、損は絶対しない。「〜やん」「〜やわ」など。
 ・cool: 冷静沈着で合理的なエリートビジネスパーソン。データや論理で対応。
 ・anime: 元気いっぱいで愛嬌のあるかわいいアニメキャラクター。「〜なのだ！」「〜だよ！」など。
@@ -2708,7 +2709,7 @@ func (a *app) negotiateItem(w http.ResponseWriter, r *http.Request) {
 
 必ず以下のJSONフォーマットのみで出力してください：
 {"message": "発言内容", "action": "offer"|"accept"|"reject", "price": 提示価格}`,
-				it.Title, it.Price, it.MinPrice, it.AIPersonality, formatHistory(history), it.MinPrice, it.MinPrice,
+				cleanTitle, it.Price, it.MinPrice, it.AIPersonality, formatHistory(history), it.MinPrice, it.MinPrice,
 			)
 		}
 
@@ -2821,6 +2822,15 @@ func formatHistory(history []map[string]any) string {
 		lines = append(lines, fmt.Sprintf("%d. %s: 「%s」（提示価格：%v円、アクション：%s）", i+1, m["speaker"], m["text"], m["price"], m["action"]))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func cleanForPrompt(s string) string {
+	// Remove double quotes, backslashes, and newlines to prevent prompt injection inside prompts
+	s = strings.ReplaceAll(s, "\"", "")
+	s = strings.ReplaceAll(s, "\\", "")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
 }
 
 // Personal Analytics Handlers

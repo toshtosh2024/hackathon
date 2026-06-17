@@ -2149,7 +2149,7 @@ function renderMarkdown(source: string) {
       flushParagraph();
       closeList();
       const level = Math.min(heading[1].length, 3);
-      html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+      html.push(`<h${level}>${renderInline(escapeHtml(heading[2]))}</h${level}>`);
       continue;
     }
 
@@ -2159,7 +2159,7 @@ function renderMarkdown(source: string) {
         html.push("<ul>");
         inList = true;
       }
-      html.push(`<li>${renderInline(bullet[1])}</li>`);
+      html.push(`<li>${renderInline(escapeHtml(bullet[1]))}</li>`);
       continue;
     }
 
