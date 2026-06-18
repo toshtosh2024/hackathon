@@ -167,6 +167,8 @@ function App() {
         break;
       case 9:
         setAutoPilotPrompt("📸 [9/10] 生成AI（DALL-E & シネマグラフ）による写真・動画を生成中（完了を検知します）...");
+        // Teleport/navigate back to iPhone 14 Pro Details to mount ItemDetailScreen and trigger generation
+        navigate({ page: "item", itemId: 9901 });
         break;
       case 10:
         setAutoPilotPrompt("🎉 [10/10] デモツアー完了！ご清聴ありがとうございました！");
