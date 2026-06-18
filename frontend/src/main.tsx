@@ -920,7 +920,7 @@ function SellScreen({
         </div>
       </div>
 
-      <form onSubmit={submit} className="panel sell-panel" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+      <form onSubmit={submit} className="panel form-panel" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
         <div className="input-group">
           <label>商品名</label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="ルイヴィトンの折りたたみ財布" />
