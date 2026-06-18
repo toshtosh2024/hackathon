@@ -3,9 +3,11 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -165,4 +167,61 @@ func (a *app) changePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "パスワードを正常に更新しました"})
+}
+
+func (a *app) resetPasswordDemo(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" || len(req.Password) < 6 {
+		writeError(w, http.StatusBadRequest, "email cannot be empty and password must be at least 6 characters")
+		return
+	}
+
+	hashed := a.hashPassword(req.Password)
+	db := a.dbHandle()
+
+	// Check if user exists
+	var id int64
+	err := db.QueryRowContext(r.Context(), "SELECT id FROM users WHERE email = ?", email).Scan(&id)
+	if err == sql.ErrNoRows {
+		// Does not exist, register them on the fly!
+		res, err := db.ExecContext(r.Context(), 
+			"INSERT INTO users (name, email, password_hash, role) VALUES ('DemoUser', ?, ?, 'user')",
+			email, hashed,
+		)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to auto-register demo user: "+err.Error())
+			return
+		}
+		newID, _ := res.LastInsertId()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "success", 
+			"message": fmt.Sprintf("アカウント '%s' が存在しないため、パスワード '%s' で新規自動登録しました！そのままログインしてください。", email, req.Password),
+			"userId": newID,
+		})
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "database error: "+err.Error())
+		return
+	}
+
+	// Exists, overwrite password_hash directly!
+	_, err = db.ExecContext(r.Context(), "UPDATE users SET password_hash = ? WHERE id = ?", hashed, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update password: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "success",
+		"message": fmt.Sprintf("アカウント '%s' のパスワードを '%s' に強制上書きしました！そのままログインしてください。", email, req.Password),
+		"userId": id,
+	})
 }

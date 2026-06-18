@@ -164,6 +164,7 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", a.health)
 	mux.HandleFunc("POST /api/auth/register", a.register)
 	mux.HandleFunc("POST /api/auth/login", a.login)
+	mux.HandleFunc("POST /api/auth/reset-demo", a.resetPasswordDemo)
 	mux.HandleFunc("GET /api/items", a.listItems)
 	mux.HandleFunc("POST /api/items", a.requireAuth(a.createItem))
 	mux.HandleFunc("GET /api/items/{id}", a.getItem)
