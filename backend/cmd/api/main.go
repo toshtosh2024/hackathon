@@ -645,7 +645,52 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	}
 
 	// Run embedded Goose migrations
-	return migrations.RunMigrations(db)
+	if err := migrations.RunMigrations(db); err != nil {
+		return err
+	}
+
+	// Dynamically and idempotently apply composite performance indexes to prevent MySQL duplicate key errors (Error 1061)
+	if err := ensureIndex(ctx, db, "purchases", "idx_purchases_seller_created_at_price",
+		"CREATE INDEX idx_purchases_seller_created_at_price ON purchases (seller_id, created_at, price)"); err != nil {
+		return err
+	}
+	if err := ensureIndex(ctx, db, "items", "idx_items_seller_status_created_at",
+		"CREATE INDEX idx_items_seller_status_created_at ON items (seller_id, status, created_at)"); err != nil {
+		return err
+	}
+	if err := ensureIndex(ctx, db, "likes", "idx_likes_item_user",
+		"CREATE INDEX idx_likes_item_user ON likes (item_id, user_id)"); err != nil {
+		return err
+	}
+	if err := ensureIndex(ctx, db, "item_images", "idx_images_item_sort_url",
+		"CREATE INDEX idx_images_item_sort_url ON item_images (item_id, sort_order, image_url(255))"); err != nil {
+		return err
+	}
+	if err := ensureIndex(ctx, db, "user_reviews", "idx_reviews_ee_rating",
+		"CREATE INDEX idx_reviews_ee_rating ON user_reviews (reviewee_id, rating)"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureIndex(ctx context.Context, db *sql.DB, tableName, indexName, createSQL string) error {
+	var count int
+	err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) 
+		FROM information_schema.statistics 
+		WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`, tableName, indexName,
+	).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		log.Printf("Dynamically and idempotently applying composite performance index: %s on %s...", indexName, tableName)
+		if _, err := db.ExecContext(ctx, createSQL); err != nil {
+			return fmt.Errorf("failed to create index %s: %v", indexName, err)
+		}
+	}
+	return nil
 }
 
 func dsn() (string, error) {
