@@ -658,7 +658,7 @@ export function AppraisalModal({ item, onClose }: AppraisalModalProps) {
           materials: "医療用サージカル・ステンレス ＆ セラミックシールドガラス",
           surfaceWear: "0.02% （光学3D深度スキャンにより、極微細なヘアライン擦れのみ検出）",
           structuralIntegrity: "100% 歪み・変形なし",
-          estimatedMarket: "¥82,500 〜 ¥88,000 （関東・関西地区における需要：高）"
+          estimatedMarket: `¥${Math.round(item.price * 0.94).toLocaleString()} 〜 ¥${Math.round(item.price * 1.02).toLocaleString()} （地域相場需要：高）`
         };
       case "衣服・ファッション":
         return {
@@ -667,7 +667,7 @@ export function AppraisalModal({ item, onClose }: AppraisalModalProps) {
           materials: "最高級エジプト超長綿 100% ギャバジン織り",
           surfaceWear: "0.05% （繊維3Dマイクロ解析。毛羽立ち・シミ・色褪せ等なしの極美品）",
           structuralIntegrity: "99.8% ほつれ・ヨレなし",
-          estimatedMarket: "¥40,000 〜 ¥45,000 （トレンド需要：安定）"
+          estimatedMarket: `¥${Math.round(item.price * 0.95).toLocaleString()} 〜 ¥${Math.round(item.price * 1.05).toLocaleString()} （トレンド需要：安定）`
         };
       case "本・ゲーム・エンタメ":
         return {
@@ -676,7 +676,7 @@ export function AppraisalModal({ item, onClose }: AppraisalModalProps) {
           materials: "高耐衝撃性ポリカーボネート樹脂 ＆ 強化耐熱アクリル",
           surfaceWear: "0.08% （端子部、通気口、角部へのチリ・手垢・摩耗なし）",
           structuralIntegrity: "100% 液晶ドット抜け・ヒンジ歪みなし",
-          estimatedMarket: "¥26,000 〜 ¥29,000 （中古市場流動性：超活発）"
+          estimatedMarket: `¥${Math.round(item.price * 0.93).toLocaleString()} 〜 ¥${Math.round(item.price * 1.03).toLocaleString()} （中古市場流動性：超活発）`
         };
       default:
         return {
@@ -685,7 +685,7 @@ export function AppraisalModal({ item, onClose }: AppraisalModalProps) {
           materials: "高耐久合成アクリル ＆ 削り出しアルミニウム合金",
           surfaceWear: "0.15% （経年変化、生活擦れのみ検出。Aクラス良品）",
           structuralIntegrity: "100% 健全",
-          estimatedMarket: "¥2,000 〜 ¥5,000"
+          estimatedMarket: `¥${Math.round(item.price * 0.90).toLocaleString()} 〜 ¥${Math.round(item.price * 1.05).toLocaleString()}`
         };
     }
   };

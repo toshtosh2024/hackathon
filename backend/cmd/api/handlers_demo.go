@@ -162,6 +162,15 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 		INSERT IGNORE INTO conversations (id, item_id, buyer_id, seller_id) 
 		VALUES (999, 9901, ?, 9992)`, currentUserRecord.ID)
 
+	// Seed high-fidelity chat messages for conversation 999 to make the DM navigator look completely complete and alive!
+	_, _ = databaseTransaction.ExecContext(r.Context(), `
+		INSERT INTO messages (conversation_id, sender_id, body) 
+		VALUES (999, ?, 'はじめまして！こちらのiPhone 14 Proを購入させていただきます。AI交渉によって83,000円での合意となりましたので、Stripe安全決済で手続きを進めます。どうぞよろしくお願いいたします！')`, currentUserRecord.ID)
+
+	_, _ = databaseTransaction.ExecContext(r.Context(), `
+		INSERT INTO messages (conversation_id, sender_id, body) 
+		VALUES (999, 9992, 'はじめまして！ご購入ありがとうございます。大阪商人AIがかなり勉強してしまったようですが（笑）、非常に良い取引ができて嬉しいです。決済の確認が取れましたので、ただいま梱包作業に入らせていただいております。発送しましたら追跡情報をお送りしますね！')`)
+
 	// Commit transaction safely
 	if err := databaseTransaction.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit demo seed")
