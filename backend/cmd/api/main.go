@@ -447,7 +447,7 @@ func saveGeneratedImageToGCS(prefix string, filename string, contentType string,
 }
 
 func (a *app) callOpenAI(ctx context.Context, prompt string) (string, error) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
 		return "AI機能（シミュレーション）が稼働しました！", nil
 	}
@@ -494,7 +494,7 @@ func (a *app) callOpenAI(ctx context.Context, prompt string) (string, error) {
 }
 
 func (a *app) callOpenAIJSON(ctx context.Context, prompt string, v any) error {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
 		return errors.New("missing OPENAI_API_KEY")
 	}
@@ -548,7 +548,7 @@ type imageUpload struct {
 }
 
 func (a *app) callOpenAIImageEdit(ctx context.Context, prompt string, uploads []imageUpload) ([]byte, error) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
 		return nil, errors.New("missing OPENAI_API_KEY")
 	}
