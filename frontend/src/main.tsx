@@ -102,7 +102,12 @@ function App() {
 
   useEffect(() => {
     function syncRoute() {
-      setRoute(readRoute());
+      const r = readRoute();
+      if (!token && r.page !== "auth") {
+        window.location.hash = "auth";
+      } else {
+        setRoute(r);
+      }
     }
     window.addEventListener("hashchange", syncRoute);
     syncRoute();
@@ -255,7 +260,6 @@ function App() {
     setUser(nextUser);
     localStorage.setItem("token", nextToken);
     localStorage.setItem("user", JSON.stringify(nextUser));
-    setNotice(`${nextUser.name} さん、ようこそ`);
     navigate({ page: "home" });
   };
 
