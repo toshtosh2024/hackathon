@@ -190,7 +190,7 @@ function App() {
       case 10:
         setAutoPilotPrompt("🎉 [10/10] デモツアー完了！ご清聴ありがとうございました！");
         timer = setTimeout(() => {
-          alert("🎉 フルオート・デモツアー完了！\nすべての次世代AI機能（3D空間スキャン、AIエージェント交渉、わらしべ物々交換、Stripeエスクロー、DALL-Eシネマグラフ）をご体験いただき、誠にありがとうございました！\nNext Marketはハッカソン本番で最高品質の評価を獲得できるレベルで完全に実稼働します。");
+          alert("🎉 デモツアーお疲れ様でした！\nすべての次世代AI機能（3D空間スキャン、AIエージェント交渉、わらしべ物々交換、Stripeエスクロー、DALL-Eシネマグラフ）をご体験いただき、誠にありがとうございました！\nNext Marketの革新的な機能をご清聴いただき、重ねて御礼申し上げます。");
           setAutoPilot(false);
           setAutoPilotStep(0);
           setAutoPilotPrompt("");
