@@ -109,6 +109,18 @@ function App() {
     return () => window.removeEventListener("hashchange", syncRoute);
   }, [token]);
 
+  const handleCompleteAutopilotStep = (step: number) => {
+    if (!autoPilot) return;
+
+    if (step === 3) {
+      setAutoPilotStep(4);
+    } else if (step === 7) {
+      setAutoPilotStep(8);
+    } else if (step === 8) {
+      setAutoPilotStep(9);
+    }
+  };
+
   // Autopilot Director Core Hook
   useEffect(() => {
     if (!autoPilot) return;
@@ -129,10 +141,8 @@ function App() {
         }, 2800);
         break;
       case 3:
-        setAutoPilotPrompt("💬 [3/9] お互いの意思決定AI同士で値下げ・購入合意を交渉中...");
-        timer = setTimeout(() => {
-          setAutoPilotStep(4);
-        }, 11500); // Give ample time for bargaining live bubbles to play out
+        setAutoPilotPrompt("💬 [3/9] お互いの意思決定AI同士で値下げ・購入合意を自律交渉中（完了を検知します）...");
+        // Event-driven: No timer! Advanced by handleCompleteAutopilotStep(3)
         break;
       case 4:
         setAutoPilotPrompt("🔒 [4/9] Stripeエスクロー決済成立を確認。DMs取引ナビへ遷移します...");
@@ -156,17 +166,12 @@ function App() {
         }, 4500);
         break;
       case 7:
-        setAutoPilotPrompt("🚚 [7/9] 3者間での商品配送・受領・売上金の確定を自動クリア...");
-        timer = setTimeout(() => {
-          setAutoPilotStep(8);
-        }, 6500);
+        setAutoPilotPrompt("🚚 [7/9] 3者間での商品配送・受領・売上金の確定を自律処理中（完了を検知します）...");
+        // Event-driven: No timer! Advanced by handleCompleteAutopilotStep(7)
         break;
       case 8:
-        setAutoPilotPrompt("📸 [8/9] 生成AI（DALL-E & シネマグラフ）による写真・動画を生成・再生中...");
-        timer = setTimeout(() => {
-          navigate({ page: "item", itemId: 9901 });
-          setAutoPilotStep(9);
-        }, 6500);
+        setAutoPilotPrompt("📸 [8/9] 生成AI（DALL-E & シネマグラフ）による写真・動画を生成中（完了を検知します）...");
+        // Event-driven: No timer! Advanced by handleCompleteAutopilotStep(8)
         break;
       case 9:
         setAutoPilotPrompt("🎉 [9/9] デモツアー完了！ご清聴ありがとうございました！");
@@ -396,6 +401,7 @@ function App() {
                 }}
                 autoPilot={autoPilot}
                 autoPilotStep={autoPilotStep}
+                onCompleteAutopilotStep={handleCompleteAutopilotStep}
               />
             )
           )}
@@ -433,6 +439,7 @@ function App() {
               }}
               autoPilot={autoPilot}
               autoPilotStep={autoPilotStep}
+              onCompleteAutopilotStep={handleCompleteAutopilotStep}
             />
           )}
 
@@ -966,7 +973,8 @@ function ItemDetailScreen({
   onConversationCreated,
   onCompleteStep,
   autoPilot,
-  autoPilotStep
+  autoPilotStep,
+  onCompleteAutopilotStep
 }: {
   item: Item | null;
   user: User | null;
@@ -978,6 +986,7 @@ function ItemDetailScreen({
   onCompleteStep?: (step: number) => void;
   autoPilot?: boolean;
   autoPilotStep?: number;
+  onCompleteAutopilotStep?: (step: number) => void;
 }) {
   const [question, setQuestion] = useState("通勤用として雨の日にも使えそう？");
   const [answer, setAnswer] = useState("");
@@ -1035,9 +1044,14 @@ function ItemDetailScreen({
     // Generate AI Scene image immediately
     const timer = setTimeout(() => {
       generateScene().then(() => {
-        // Once the image is generated, wait 1.8 seconds and generate the Cinema Video!
+        // Once the image is generated, wait 2.2 seconds and generate the Cinema Video!
         setTimeout(() => {
-          generateSceneVideo();
+          generateSceneVideo().then(() => {
+            // Wait 5.5 seconds for the user to enjoy the live movie cinemagraph!
+            setTimeout(() => {
+              if (onCompleteAutopilotStep) onCompleteAutopilotStep(8);
+            }, 5500);
+          });
         }, 2200);
       });
     }, 1500);
@@ -1193,6 +1207,11 @@ function ItemDetailScreen({
             onNotice("AI交渉が決裂しました。予算を調整して再交渉できます。");
           }
           if (onCompleteStep) onCompleteStep(1);
+          if (autoPilot && onCompleteAutopilotStep) {
+            setTimeout(() => {
+              onCompleteAutopilotStep(3);
+            }, 3000);
+          }
         } else {
           setDialogueIndex(idx);
         }

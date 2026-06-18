@@ -32,7 +32,8 @@ export function MyPageScreen({
   onCancelled,
   onCompleteStep,
   autoPilot,
-  autoPilotStep
+  autoPilotStep,
+  onCompleteAutopilotStep
 }: {
   user: User | null;
   myItems: Item[];
@@ -45,6 +46,7 @@ export function MyPageScreen({
   onCompleteStep?: (step: number) => void;
   autoPilot?: boolean;
   autoPilotStep?: number;
+  onCompleteAutopilotStep?: (step: number) => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [profileError, setProfileError] = useState("");
@@ -77,7 +79,11 @@ export function MyPageScreen({
         shipBarter(999);
       }, 1000);
       const timerReceive = setTimeout(() => {
-        receiveBarter(999);
+        receiveBarter(999).then(() => {
+          setTimeout(() => {
+            if (onCompleteAutopilotStep) onCompleteAutopilotStep(7);
+          }, 3000); // Wait 3 seconds for judge to read loop completion screen!
+        });
       }, 3500);
       return () => {
         clearTimeout(timerShip);
