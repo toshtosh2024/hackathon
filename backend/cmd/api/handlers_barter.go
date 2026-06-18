@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -428,6 +429,40 @@ func (a *app) balancedBarterClearing(ctx context.Context, loop []int64, nodes []
 		}
 	}
 
+	// 🏆 1. Calculate mathematically perfect zero-sum adjustments programmatically in Go
+	// Formula: CashReceived_i = Price(GivenItem_i) - Price(ReceivedItem_i)
+	mathAdjustments := make(map[int64]int)
+	var explanationParts []string
+
+	for i, id := range loop {
+		var givenPrice int
+		var title string
+		for _, item := range targetItems {
+			if item.ItemID == id {
+				givenPrice = item.Price
+				title = item.Title
+				break
+			}
+		}
+
+		// Received item is the NEXT item in the circular loop array
+		nextIdx := (i + 1) % len(loop)
+		receivedID := loop[nextIdx]
+		var receivedPrice int
+		for _, item := range targetItems {
+			if item.ItemID == receivedID {
+				receivedPrice = item.Price
+				break
+			}
+		}
+
+		// Cash adjustment: positive means receive, negative means pay
+		adj := givenPrice - receivedPrice
+		mathAdjustments[id] = adj
+		explanationParts = append(explanationParts, fmt.Sprintf("・「%s」(価格: ¥%d) の提供者 ➔ 清算金収支: ¥%d", title, givenPrice, adj))
+	}
+
+	explanationList := strings.Join(explanationParts, "\n")
 	itemsJSON, _ := json.Marshal(targetItems)
 
 	prompt := fmt.Sprintf(`あなたは物々交換の調停AIファイナンシャルアドバイザーです。
@@ -436,31 +471,19 @@ func (a *app) balancedBarterClearing(ctx context.Context, loop []int64, nodes []
 対象商品リスト:
 %s
 
-各商品の出品価格は参考価格です。
-等価交換を完全に成立させるため、以下の財務ルールに従って、各メンバーが「支払うべき調整金（マイナス）」または「受け取るべき調整金（プラス）」を円単位で決定してください。
+等価交換（参加者全員の取引完了時の純利益がちょうど「0円」となる状態）を完全に成立させるため、システムは以下の数式モデル（提供商品価格 - 受領商品価格）に基づき、各メンバーの「清算調整金」を正確に算定しました。
+算定済みの清算調整金（合計は必ずぴったり0円となります）：
+%s
 
-財務ルール：
-1. ループ全体の調整金の総和は必ず「ちょうど0円（ゼロサム）」にしてください（例: Aが+1000円、Bが-1500円、Cが+500円 ➔ 合計0円）。
-2. 市場価値（出品価格）が高い商品を提供する人は、価値の低い商品を受け取る代わりに、差額を受け取る（プラス）べきです。
-3. 価値の低い商品を提供する人は、価値の高い商品を受け取る代わりに、差額を支払う（マイナス）べきです。
-4. それぞれの取引バランスの妥当な「査定・解説理由」を日本語で作成してください。
+この価格差調整（清算調整金）の意義、全員が等価・公平に循環トレードできる仕組みの妥当性について、プロフェッショナルで親切な「査定・解説理由」を日本語（100文字以上）で作成してください。
 
 必ず以下のJSONフォーマットのみで出力してください（マークダウンのコードブロックで囲まず、生のJSONテキストのみを出力してください）：
 {
-  "justification": "各商品の査定理由と差額調整の合計50文字以上の詳細な日本語解説",
-  "adjustments": [
-    {"itemId": 101, "adjustment": 1000},
-    {"itemId": 102, "adjustment": -1500},
-    {"itemId": 103, "adjustment": 500}
-  ]
-}`, len(loop), string(itemsJSON))
+  "justification": "数式モデルの解説を交えた、公平な取引理由に関するプロフェッショナルな日本語解説（100文字以上）"
+}`, len(loop), string(itemsJSON), explanationList)
 
 	var res struct {
 		Justification string `json:"justification"`
-		Adjustments   []struct {
-			ItemID     int64 `json:"itemId"`
-			Adjustment int   `json:"adjustment"`
-		} `json:"adjustments"`
 	}
 
 	err := a.callOpenAIJSON(ctx, prompt, &res)
@@ -468,21 +491,5 @@ func (a *app) balancedBarterClearing(ctx context.Context, loop []int64, nodes []
 		return "", nil, err
 	}
 
-	adjMap := make(map[int64]int)
-	for _, adj := range res.Adjustments {
-		adjMap[adj.ItemID] = adj.Adjustment
-	}
-
-	// Fallback verification to guarantee zero-sum safety inside Go runtime
-	var totalSum int
-	for _, adj := range adjMap {
-		totalSum += adj
-	}
-	if totalSum != 0 {
-		log.Printf("Barter Matcher: OpenAI returned non-zero sum: %d. Forcing balance on first node.", totalSum)
-		// Forcibly balance the first item in the loop to zero-sum
-		adjMap[loop[0]] -= totalSum
-	}
-
-	return res.Justification, adjMap, nil
+	return res.Justification, mathAdjustments, nil
 }
