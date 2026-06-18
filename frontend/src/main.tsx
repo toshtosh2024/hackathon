@@ -106,12 +106,16 @@ function App() {
   // オートパイロットのステップ進行をトリガーするハンドラ
   const handleCompleteAutopilotStep = (step: number) => {
     if (!autoPilot) return;
-    if (step === 3) {
+    if (step === 2) {
+      setAutoPilotStep(3);
+    } else if (step === 3) {
       setAutoPilotStep(4);
-    } else if (step === 7) {
-      setAutoPilotStep(8);
+    } else if (step === 4) {
+      setAutoPilotStep(5);
     } else if (step === 8) {
       setAutoPilotStep(9);
+    } else if (step === 9) {
+      setAutoPilotStep(10);
     }
   };
 
@@ -122,52 +126,52 @@ function App() {
     let timer: any;
     switch (autoPilotStep) {
       case 1:
-        setAutoPilotPrompt("🚀 [1/9] iPhone 14 Pro 詳細ページへ自動テレポート中...");
+        setAutoPilotPrompt("🚀 [1/10] iPhone 14 Pro 詳細ページへ自動テレポート中...");
         timer = setTimeout(() => {
           navigate({ page: "item", itemId: 9901 });
           setAutoPilotStep(2);
         }, 2200);
         break;
       case 2:
-        setAutoPilotPrompt("🤖 [2/9] 大阪商人交渉AIとの自律価格交渉室をロード中...");
-        timer = setTimeout(() => {
-          setAutoPilotStep(3);
-        }, 2800);
+        setAutoPilotPrompt("🔮 [2/10] iPhone 14 Pro を3D空間スキャンし、材質や摩耗率、適正価値を測定中...");
         break;
       case 3:
-        setAutoPilotPrompt("💬 [3/9] お互いの意思決定AI同士で値下げ・購入合意を自律交渉中（完了を検知します）...");
+        setAutoPilotPrompt("🤖 [3/10] 3Dスキャンで判定された適正価値を参考に、AI価格交渉室を起動中...");
         break;
       case 4:
-        setAutoPilotPrompt("🔒 [4/9] Stripeエスクロー決済成立を確認。DMs取引ナビへ遷移します...");
+        setAutoPilotPrompt("💬 [4/10] お互いの意思決定AI同士で値下げ・購入合意を自律交渉中（完了を検知します）...");
+        break;
+      case 5:
+        setAutoPilotPrompt("🔒 [5/10] Stripeエスクロー決済成立を確認。DMs取引ナビへ遷移します...");
         timer = setTimeout(() => {
           navigate({ page: "messages" });
           setSelectedConversationId(999);
-          setAutoPilotStep(5);
-        }, 4500);
-        break;
-      case 5:
-        setAutoPilotPrompt("🔄 [5/9] マイページの「AIわらしべ物々交換」ボードを開きます...");
-        timer = setTimeout(() => {
-          navigate({ page: "mypage" });
           setAutoPilotStep(6);
-        }, 4000);
+        }, 4500);
         break;
       case 6:
-        setAutoPilotPrompt("🤝 [6/9] マッチング成立中の等価循環ループを自動『承認』します...");
+        setAutoPilotPrompt("🔄 [6/10] マイページの「AIわらしべ物々交換」ボードを開きます...");
         timer = setTimeout(() => {
+          navigate({ page: "mypage" });
           setAutoPilotStep(7);
-        }, 4500);
+        }, 4000);
         break;
       case 7:
-        setAutoPilotPrompt("🚚 [7/9] 3者間での商品配送・受領・売上金の確定を自律処理中（完了を検知します）...");
+        setAutoPilotPrompt("🤝 [7/10] マッチング成立中の等価循環ループを自動『承認』します...");
+        timer = setTimeout(() => {
+          setAutoPilotStep(8);
+        }, 4500);
         break;
       case 8:
-        setAutoPilotPrompt("📸 [8/9] 生成AI（DALL-E & シネマグラフ）による写真・動画を生成中（完了を検知します）...");
+        setAutoPilotPrompt("🚚 [8/10] 3者間での商品配送・受領・売上金の確定を自律処理中（完了を検知します）...");
         break;
       case 9:
-        setAutoPilotPrompt("🎉 [9/9] デモツアー完了！ご清聴ありがとうございました！");
+        setAutoPilotPrompt("📸 [9/10] 生成AI（DALL-E & シネマグラフ）による写真・動画を生成中（完了を検知します）...");
+        break;
+      case 10:
+        setAutoPilotPrompt("🎉 [10/10] デモツアー完了！ご清聴ありがとうございました！");
         timer = setTimeout(() => {
-          alert("🎉 フルオート・デモツアー完了！\nすべての次世代AI機能とStripeエスクロー決済シミュレーションをご体験いただき、誠にありがとうございました！\nNext Marketはハッカソン本番で最高品質の評価を獲得できるレベルで完全に実稼働します。");
+          alert("🎉 フルオート・デモツアー完了！\nすべての次世代AI機能（3D空間スキャン、AIエージェント交渉、わらしべ物々交換、Stripeエスクロー、DALL-Eシネマグラフ）をご体験いただき、誠にありがとうございました！\nNext Marketはハッカソン本番で最高品質の評価を獲得できるレベルで完全に実稼働します。");
           setAutoPilot(false);
           setAutoPilotStep(0);
           setAutoPilotPrompt("");

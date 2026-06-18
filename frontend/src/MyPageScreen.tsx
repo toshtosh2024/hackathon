@@ -66,15 +66,15 @@ export function MyPageScreen({
   useEffect(() => {
     if (!autoPilot) return;
 
-    if (autoPilotStep === 5) {
+    if (autoPilotStep === 6) {
       setActiveTab("barter");
-    } else if (autoPilotStep === 6) {
+    } else if (autoPilotStep === 7) {
       // Auto-approve barter loop #999!
       const timer = setTimeout(() => {
         acceptBarter(999);
       }, 1500);
       return () => clearTimeout(timer);
-    } else if (autoPilotStep === 7) {
+    } else if (autoPilotStep === 8) {
       // Auto-ship & receive barter loop #999!
       const timerShip = setTimeout(() => {
         shipBarter(999);
@@ -82,7 +82,7 @@ export function MyPageScreen({
       const timerReceive = setTimeout(() => {
         receiveBarter(999).then(() => {
           setTimeout(() => {
-            if (onCompleteAutopilotStep) onCompleteAutopilotStep(7);
+            if (onCompleteAutopilotStep) onCompleteAutopilotStep(8);
           }, 3000); // Wait 3 seconds for judge to read loop completion screen!
         });
       }, 3500);

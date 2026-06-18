@@ -168,9 +168,25 @@ export function ItemDetailScreen({
     if (!autoPilot) return;
 
     if (autoPilotStep === 2) {
+      // Automatically open the 3D Appraisal Scanner!
+      setShowAppraisal(true);
+      
+      const timer = setTimeout(() => {
+        setShowAppraisal(false);
+        if (onCompleteAutopilotStep) onCompleteAutopilotStep(2);
+      }, 4500); // Hold for 4.5 seconds so they can see the scanner
+      return () => clearTimeout(timer);
+    } else if (autoPilotStep === 3) {
+      // Open the AI negotiation modal
       setBuyerBudget(80000);
       setShowNegotiation(true);
-    } else if (autoPilotStep === 3) {
+      
+      const timer = setTimeout(() => {
+        if (onCompleteAutopilotStep) onCompleteAutopilotStep(3);
+      }, 2200);
+      return () => clearTimeout(timer);
+    } else if (autoPilotStep === 4) {
+      // Start the actual pricing negotiation simulation
       const timer = setTimeout(() => {
         void startNegotiation();
       }, 1000);
@@ -179,14 +195,14 @@ export function ItemDetailScreen({
   }, [autoPilot, autoPilotStep]);
 
   useEffect(() => {
-    if (!autoPilot || autoPilotStep !== 8) return;
+    if (!autoPilot || autoPilotStep !== 9) return;
 
     const timer = setTimeout(() => {
       generateScene().then(() => {
         setTimeout(() => {
           generateSceneVideo().then(() => {
             setTimeout(() => {
-              if (onCompleteAutopilotStep) onCompleteAutopilotStep(8);
+              if (onCompleteAutopilotStep) onCompleteAutopilotStep(9);
             }, 5500);
           });
         }, 2200);
