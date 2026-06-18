@@ -63,7 +63,13 @@ export function AuthScreen({
       }
       onSessionUpdated(data.token, data.user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "認証に失敗しました");
+      const errMsg = err instanceof Error ? err.message : "";
+      if (mode === "register" && (errMsg.includes("already registered") || errMsg.includes("409") || errMsg.includes("duplicate"))) {
+        setMode("login");
+        setError("このメールアドレスは既に登録されています。自動的にログインモードに切り替えました。パスワードを確認し、もう一度ボタンを押してログインしてください。");
+      } else {
+        setError(err instanceof Error ? err.message : "認証に失敗しました");
+      }
     } finally {
       setLoading(false);
     }
