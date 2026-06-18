@@ -738,6 +738,17 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 
+	// Self-healing DB check: If barter_loop_members is missing the 'user_id' column, drop and recreate them cleanly
+	var colCount int
+	_ = db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE() AND table_name = 'barter_loop_members' AND column_name = 'user_id'`).Scan(&colCount)
+	if colCount == 0 {
+		_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS barter_loop_members")
+		_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS barter_loops")
+	}
+
 	if err := ensureTable(ctx, db, `CREATE TABLE IF NOT EXISTS barter_loops (
 		id BIGINT PRIMARY KEY AUTO_INCREMENT,
 		status VARCHAR(30) NOT NULL DEFAULT 'pending',
