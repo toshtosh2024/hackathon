@@ -50,6 +50,7 @@ export function MyPageScreen({
 }) {
   const [uploading, setUploading] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [newPassword, setNewPassword] = useState("");
 
   const [activeTab, setActiveTab] = useState<"listings" | "dashboard" | "barter">("listings");
   const [stats, setStats] = useState<PersonalStats | null>(null);
@@ -235,6 +236,45 @@ export function MyPageScreen({
           </div>
         </div>
         {profileError && <p className="error">{profileError}</p>}
+
+        {/* Password Update Panel */}
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px", marginTop: "16px", display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
+          <strong style={{ fontSize: "14px", color: "#1e293b", display: "flex", alignItems: "center", gap: "6px" }}>
+            🔒 セキュリティ設定（パスワード変更）
+          </strong>
+          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              type="password"
+              placeholder="新しいパスワード（6文字以上）"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              style={{ flex: 1, minWidth: "200px", padding: "8px 12px", fontSize: "13px", borderRadius: "8px" }}
+            />
+            <button
+              onClick={async () => {
+                if (newPassword.length < 6) {
+                  alert("パスワードは6文字以上で入力してください。");
+                  return;
+                }
+                setProfileError("");
+                try {
+                  await api("/profile/password", {
+                    method: "POST",
+                    body: JSON.stringify({ password: newPassword })
+                  });
+                  setNewPassword("");
+                  alert("🔐 パスワードを正常に変更しました！\n次回ログイン時から新しいパスワードが有効になります。");
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : "パスワードの変更に失敗しました");
+                }
+              }}
+              className="primary-button"
+              style={{ background: "#275643", color: "#fff", border: "none", padding: "8px 16px", fontSize: "13px", cursor: "pointer", borderRadius: "8px" }}
+            >
+              更新する
+            </button>
+          </div>
+        </div>
 
         {/* Tab Controls */}
         <div style={{ display: "flex", borderBottom: "2px solid #eadfd3", gap: "16px", margin: "24px 0 16px 0", flexWrap: "wrap" }}>

@@ -139,3 +139,30 @@ func (a *app) verifyToken(token string) (user, error) {
 	}
 	return user{ID: claims.Sub, Name: claims.Name, Email: claims.Email, Role: claims.Role, AvatarURL: claims.AvatarURL}, nil
 }
+
+func (a *app) changePassword(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	var req struct {
+		Password string `json:"password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	if len(req.Password) < 6 {
+		writeError(w, http.StatusBadRequest, "password must be at least 6 characters")
+		return
+	}
+
+	hashed := a.hashPassword(req.Password)
+	_, err := a.dbHandle().ExecContext(r.Context(),
+		"UPDATE users SET password_hash = ? WHERE id = ?",
+		hashed, u.ID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update password")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "パスワードを正常に更新しました"})
+}

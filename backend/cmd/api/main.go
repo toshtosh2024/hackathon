@@ -184,6 +184,8 @@ func main() {
 	mux.HandleFunc("POST /api/items/{id}/ai-video", a.requireAuth(a.generateSceneVideo))
 	mux.HandleFunc("POST /api/items/{id}/cancel", a.requireAuth(a.cancelItem))
 	mux.HandleFunc("POST /api/upload", a.requireAuth(a.createUploadURL))
+	mux.HandleFunc("POST /api/profile", a.requireAuth(a.updateProfile))
+	mux.HandleFunc("POST /api/profile/password", a.requireAuth(a.changePassword))
 	mux.HandleFunc("POST /api/demo/seed", a.requireAuth(a.seedDemo))
 	mux.HandleFunc("GET /api/my/items", a.requireAuth(a.listMyItems))
 	mux.HandleFunc("GET /api/my/stats", a.requireAuth(a.getMyStats))
