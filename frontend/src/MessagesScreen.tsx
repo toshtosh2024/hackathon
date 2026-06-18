@@ -259,6 +259,7 @@ export function ReviewComposer({
         body: JSON.stringify({ purchaseId: matched.purchaseId, rating, comment })
       });
       setMessage(`🎉 ${counterpartName} さんへの受取評価を投稿しました！`);
+      setComment(""); // Clear comment on success to prevent double submission
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "受取評価の投稿に失敗しました");
     } finally {
@@ -276,7 +277,7 @@ export function ReviewComposer({
         <label style={{ fontSize: "13px", fontWeight: 600 }}>評価レーティング:</label>
         <div style={{ display: "flex", gap: "4px" }}>
           {[1, 2, 3, 4, 5].map((num) => (
-            <button key={num} type="button" onClick={() => setRating(num)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+            <button key={num} type="button" onClick={() => setRating(num)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }} disabled={message.startsWith("🎉")}>
               <Star size={20} fill={num <= rating ? "#fbbf24" : "none"} stroke={num <= rating ? "#fbbf24" : "#cbd5e1"} />
             </button>
           ))}
@@ -284,10 +285,10 @@ export function ReviewComposer({
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <label style={{ fontSize: "13px", fontWeight: 600 }}>評価コメント:</label>
-        <textarea value={comment} onChange={(e) => setComment(e.target.value)} style={{ width: "100%", height: "60px", padding: "8px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", fontFamily: "sans-serif" }} required />
+        <textarea value={comment} onChange={(e) => setComment(e.target.value)} style={{ width: "100%", height: "60px", padding: "8px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", fontFamily: "sans-serif" }} required disabled={message.startsWith("🎉")} />
       </div>
-      <button className="primary-button" type="submit" disabled={saving} style={{ alignSelf: "start", background: "#10b981", color: "#fff", border: "none", padding: "8px 16px", fontSize: "13px" }}>
-        {saving ? "投稿中..." : "評価を送信して取引を完了する"}
+      <button className="primary-button" type="submit" disabled={saving || message.startsWith("🎉")} style={{ alignSelf: "start", background: message.startsWith("🎉") ? "#cbd5e1" : "#10b981", color: "#fff", border: "none", padding: "8px 16px", fontSize: "13px", cursor: message.startsWith("🎉") ? "not-allowed" : "pointer", borderRadius: "6px" }}>
+        {saving ? "投稿中..." : message.startsWith("🎉") ? "✓ 評価送信済み" : "評価を送信して取引を完了する"}
       </button>
       {message && <p className={message.includes("失敗") ? "error" : "notice inline-notice"} style={{ margin: 0, fontSize: "13px", color: message.includes("失敗") ? "#ef4444" : "#047857" }}>{message}</p>}
     </form>
