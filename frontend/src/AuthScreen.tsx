@@ -82,15 +82,6 @@ export function AuthScreen({
         <h1>次世代のフリマサービスを体験しよう</h1>
         <p className="lede">AI交渉エージェントから、マルチホップ物々交換、Stripeエスクロー、AI自動写真補正まで完備した最先端フリマ</p>
         <div className="auth-points">
-          <article>
-            <IconLabel icon={Store} label="探す" />
-          </article>
-          <article>
-            <IconLabel icon={PackagePlus} label="売る" />
-          </article>
-          <article>
-            <IconLabel icon={MessageCircle} label="話す" />
-          </article>
         </div>
       </div>
 

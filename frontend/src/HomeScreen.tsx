@@ -61,7 +61,6 @@ export function HomeScreen({
             </div>
           )}
         </div>
-        <img className="hero-image" src="/placeholder.svg" alt="" style={{ borderRadius: "18px" }} />
       </div>
 
       <div className="filter-bar">
