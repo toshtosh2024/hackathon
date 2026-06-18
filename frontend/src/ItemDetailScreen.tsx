@@ -537,7 +537,7 @@ export function ItemDetailScreen({
       )}
 
       {showNegotiation && (
-        <div className="negotiation-modal-backdrop" style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000, padding: "20px" }}>
+        <div className="negotiation-modal-backdrop" style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000, padding: "20px" }}>
           <div className="negotiation-modal-content" style={{ background: "#fffdf9", borderRadius: "12px", border: "2px solid #eadfd3", padding: "24px", width: "100%", maxWidth: "600px", maxHeight: "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: "20px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eadfd3", paddingBottom: "12px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -815,7 +815,7 @@ export function AppraisalModal({ item, onClose }: AppraisalModalProps) {
   }, [angleX, angleY, speed]);
 
   return (
-    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(15, 23, 42, 0.75)", backdropFilter: "blur(6px)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1150, padding: "20px" }}>
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(15, 23, 42, 0.75)", backdropFilter: "blur(8px)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1150, padding: "20px" }}>
       <div style={{ background: "#0f172a", border: "2px solid #34d399", borderRadius: "16px", padding: "24px", width: "100%", maxWidth: "800px", color: "#e2e8f0", boxShadow: "0 25px 50px -12px rgba(16, 185, 129, 0.3)", display: "flex", flexDirection: "column", gap: "20px" }}>
         
         {/* Style Tag for scanning overlay and animation keyframes */}
