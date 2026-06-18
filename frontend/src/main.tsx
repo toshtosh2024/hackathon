@@ -349,10 +349,8 @@ function App() {
       {user && (
         <header className="topbar">
           <div style={{ cursor: "pointer" }} onClick={() => navigate({ page: "home" })}>
-            <p className="eyebrow" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <Store size={14} style={{ color: "#d85b46" }} /> Next Market <small style={{ fontSize: "10px", color: "#d85b46", marginLeft: "4px", background: "#fef3c7", padding: "2px 6px", borderRadius: "4px", fontWeight: "bold" }}>AI & Escrow</small>
-            </p>
-            <h1>売る。見る。話す。</h1>
+            
+            <h1>next market</h1>
           </div>
           <div className="session-card">
             {user.role === "admin" && (

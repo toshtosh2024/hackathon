@@ -79,7 +79,7 @@ export function AuthScreen({
     <section className="auth-layout">
       <div className="auth-hero">
         <p className="eyebrow">Next Market</p>
-        <h1>フリマ体験を、最初の一画面から整える。</h1>
+        <h1>次世代のフリマサービスを体験しよう</h1>
         <p className="lede">AI交渉エージェントから、マルチホップ物々交換、Stripeエスクロー、AI自動写真補正まで完備した最先端フリマ</p>
         <div className="auth-points">
           <article>
