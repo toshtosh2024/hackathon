@@ -216,3 +216,8 @@ export function getPublicUrl(url: string | null | undefined): string {
   }
   return url;
 }
+
+/**
+ * Next Market - 統一商品カテゴリーリスト
+ */
+export const CATEGORIES = ["家電・スマホ", "衣服・ファッション", "本・ゲーム・エンタメ", "おもちゃ・ホビー", "スポーツ・レジャー", "ハンドメイド", "その他"];
