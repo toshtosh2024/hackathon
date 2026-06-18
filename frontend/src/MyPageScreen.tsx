@@ -416,7 +416,34 @@ export function MyPageScreen({
                       </div>
                     </div>
                   </div>
-                  <button className="primary-button" style={{ background: "#d85b46", color: "#ffffff", border: "none", alignSelf: "center", display: "flex", alignItems: "center", gap: "8px", padding: "12px 20px", cursor: "pointer" }} onClick={() => alert("🏦 振込申請を受け付けました！\nご登録の受取口座（三菱UFJ銀行）へ、Stripe Connectを介して手数料1.5%を差し引いた金額が1〜2営業日以内に自動送金されます。")}>
+                  <button 
+                    type="button"
+                    className="primary-button" 
+                    style={{ background: (stats.summary?.totalRevenue || 0) > 0 ? "#d85b46" : "#cbd5e1", color: "#ffffff", border: "none", alignSelf: "center", display: "flex", alignItems: "center", gap: "8px", padding: "12px 20px", cursor: (stats.summary?.totalRevenue || 0) > 0 ? "pointer" : "not-allowed" }} 
+                    disabled={(stats.summary?.totalRevenue || 0) <= 0}
+                    onClick={() => {
+                      const revenue = stats.summary?.totalRevenue || 0;
+                      if (revenue <= 0) {
+                        alert("🏦 出金申請可能な売上残高がありません。");
+                        return;
+                      }
+                      const fee = Math.round(revenue * 0.015);
+                      const payout = revenue - fee;
+                      alert(`🏦 振込申請（Stripe Connect決済自動送金）を受け付けました！\n\n・申請売上残高: ¥${revenue.toLocaleString()}\n・Stripe手数料(1.5%): -¥${fee.toLocaleString()}\n・銀行口座送金額: ¥${payout.toLocaleString()}\n\nご登録の受取口座（三菱UFJ銀行）へ、1〜2営業日以内に自動送金されます。`);
+                      
+                      // Dynamically reset the local available balance to 0 on success!
+                      setStats(prev => {
+                        if (!prev) return null;
+                        return {
+                          ...prev,
+                          summary: {
+                            ...prev.summary,
+                            totalRevenue: 0 // Reset withdrawable balance to 0!
+                          }
+                        };
+                      });
+                    }}
+                  >
                     🏦 銀行口座へ売上金を出金申請
                   </button>
                 </div>
