@@ -1455,6 +1455,7 @@ function ItemDetailScreen({
                 <button type="button" className="primary-button" onClick={startNegotiation} style={{ padding: "14px", marginTop: "8px" }}>
                   🤖 代理AI交渉を開始する
                 </button>
+                {negError && <p className="error" style={{ marginTop: "12px", color: "#ef4444", fontSize: "13px", fontWeight: "600", textAlign: "center" }}>{negError}</p>}
               </div>
             ) : negotiating ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 0", gap: "16px" }}>
