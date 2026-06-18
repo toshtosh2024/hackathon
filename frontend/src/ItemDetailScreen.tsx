@@ -167,26 +167,8 @@ export function ItemDetailScreen({
   useEffect(() => {
     if (!autoPilot) return;
 
-    if (autoPilotStep === 2) {
-      // Automatically open the 3D Appraisal Scanner!
-      setShowAppraisal(true);
-      
-      const timer = setTimeout(() => {
-        setShowAppraisal(false);
-        if (onCompleteAutopilotStep) onCompleteAutopilotStep(2);
-      }, 4500); // Hold for 4.5 seconds so they can see the scanner
-      return () => clearTimeout(timer);
-    } else if (autoPilotStep === 3) {
-      // Open the AI negotiation modal
-      setBuyerBudget(80000);
-      setShowNegotiation(true);
-      
-      const timer = setTimeout(() => {
-        if (onCompleteAutopilotStep) onCompleteAutopilotStep(3);
-      }, 2200);
-      return () => clearTimeout(timer);
-    } else if (autoPilotStep === 4) {
-      // Start the actual pricing negotiation simulation
+    if (autoPilotStep === 4) {
+      // Start the actual pricing negotiation simulation (which is step 4!)
       const timer = setTimeout(() => {
         void startNegotiation();
       }, 1000);
@@ -376,7 +358,7 @@ export function ItemDetailScreen({
           if (onCompleteStep) onCompleteStep(1);
           if (autoPilot && onCompleteAutopilotStep) {
             setTimeout(() => {
-              onCompleteAutopilotStep(3);
+              onCompleteAutopilotStep(4);
             }, 3000);
           }
         } else {
@@ -550,7 +532,7 @@ export function ItemDetailScreen({
         />
       )}
 
-      {showNegotiation && (
+      {(showNegotiation || (autoPilot && (autoPilotStep === 3 || autoPilotStep === 4))) && (
         <div className="negotiation-modal-backdrop" style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000, padding: "20px" }}>
           <div className="negotiation-modal-content" style={{ background: "#fffdf9", borderRadius: "12px", border: "2px solid #eadfd3", padding: "24px", width: "100%", maxWidth: "600px", maxHeight: "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: "20px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eadfd3", paddingBottom: "12px" }}>
@@ -640,7 +622,7 @@ export function ItemDetailScreen({
         </div>
       )}
 
-      {showAppraisal && (
+      {(showAppraisal || (autoPilot && autoPilotStep === 2)) && (
         <AppraisalModal 
           item={currentItem} 
           onClose={() => setShowAppraisal(false)} 
