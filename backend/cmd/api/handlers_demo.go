@@ -39,8 +39,13 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 	// 2. Clean up existing demo data (including dependent records first to satisfy Foreign Key constraints)
 	demoItemIDs := "(9901, 9902, 9903, 9904)"
 
-	// Delete child rows first (scene generations, barter loop members, negotiations, likes, and purchases)
+	// Temporarily disable foreign key checks during the transaction to guarantee 100% bypass of database blocks
+	_, _ = tx.ExecContext(r.Context(), "SET FOREIGN_KEY_CHECKS = 0")
+
+	// Delete from all possible child tables associated with the demo IDs
 	_, _ = tx.ExecContext(r.Context(), "DELETE FROM item_scene_generations WHERE item_id IN "+demoItemIDs+" OR user_id = ? OR user_id = 9992 OR user_id = 9993", u.ID)
+	_, _ = tx.ExecContext(r.Context(), "DELETE FROM ai_generations WHERE item_id IN "+demoItemIDs+" OR user_id = ? OR user_id = 9992 OR user_id = 9993", u.ID)
+	_, _ = tx.ExecContext(r.Context(), "DELETE FROM user_reviews WHERE item_id IN "+demoItemIDs)
 	_, _ = tx.ExecContext(r.Context(), "DELETE FROM barter_loop_members WHERE item_id IN "+demoItemIDs+" OR user_id = ? OR user_id = 9992 OR user_id = 9993", u.ID)
 	_, _ = tx.ExecContext(r.Context(), "DELETE FROM barter_loops WHERE id = 999")
 	_, _ = tx.ExecContext(r.Context(), "DELETE FROM negotiations WHERE item_id IN "+demoItemIDs+" OR buyer_id = ? OR buyer_id = 9992 OR buyer_id = 9993", u.ID)
@@ -57,6 +62,9 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 
 	// Finally, delete demo items themselves! No foreign key constraint violations can occur now.
 	_, _ = tx.ExecContext(r.Context(), "DELETE FROM items WHERE id IN "+demoItemIDs+" OR seller_id = ? OR seller_id = 9992 OR seller_id = 9993", u.ID)
+
+	// Re-enable foreign key checks inside the transaction before committing
+	_, _ = tx.ExecContext(r.Context(), "SET FOREIGN_KEY_CHECKS = 1")
 
 	// 3. Insert Item A: iPhone 14 Pro (AI Negotiation candidate, Osaka merchant, owned by Gadget Taro)
 	resA, err := tx.ExecContext(r.Context(), `
