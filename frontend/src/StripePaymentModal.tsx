@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 export function StripePaymentModal({
   price,
@@ -17,6 +17,16 @@ export function StripePaymentModal({
   const [name, setName] = useState("");
   const [paying, setPaying] = useState(false);
   const [success, setSuccess] = useState(false);
+
+  const timerRef1 = useRef<any>(null);
+  const timerRef2 = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef1.current) clearTimeout(timerRef1.current);
+      if (timerRef2.current) clearTimeout(timerRef2.current);
+    };
+  }, []);
 
   // Format card number with spaces
   const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -53,11 +63,11 @@ export function StripePaymentModal({
     }
     setPaying(true);
     // Simulate secure network tokenization roundtrip (1.8 seconds)
-    setTimeout(() => {
+    timerRef1.current = setTimeout(() => {
       setPaying(false);
       setSuccess(true);
       // Wait for success checkmark animation (1.2 seconds)
-      setTimeout(() => {
+      timerRef2.current = setTimeout(() => {
         onSuccess();
       }, 1200);
     }, 1800);
