@@ -505,7 +505,13 @@ export function MyPageScreen({
             {barterLoading ? (
               <div className="loading-state">物々交換のマッチングを走査中...</div>
             ) : barterError ? (
-              <p className="error">{barterError}</p>
+              <div className="panel" style={{ background: "#fffbeb", border: "1px solid #fef3c7", borderRadius: "12px", padding: "16px 20px", color: "#b45309", fontSize: "14px", display: "flex", flexDirection: "column", gap: "8px", margin: "16px 0" }}>
+                <strong style={{ fontSize: "15px" }}>⚠️ マッチングループ確認：一時的にご利用いただけません</strong>
+                <p style={{ margin: 0, color: "#92400e", lineHeight: "1.6" }}>
+                  現在データベースとの接続調整中か、有効な物々交換マッチングループ（わらしべ閉路）データを取得できませんでした。<br />
+                  少し時間を置いてから再度「AIわらしべ物々交換」タブをクリックしていただくか、画面上部の<strong>「⚡ デモデータを自動投入」</strong>を実行してダミーデータを初期化してください。
+                </p>
+              </div>
             ) : barterLoops.length === 0 ? (
               <p className="muted" style={{ padding: "20px 0" }}>
                 現在、あなたの商品を含んだ有効な循環ループ（物々交換候補）はありません。<br />
