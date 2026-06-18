@@ -205,10 +205,10 @@ func main() {
 	mux.HandleFunc("POST /api/barter/loops/{id}/receive", a.requireAuth(a.receiveBarterLoop))
 
 	// Admin Dashboard Routes
-	mux.HandleFunc("GET /api/admin/stats", a.requireAdmin(a.getAdminStats))
-	mux.HandleFunc("GET /api/admin/moderations", a.requireAdmin(a.getAdminModerations))
-	mux.HandleFunc("GET /api/admin/users", a.requireAdmin(a.getAdminUsers))
-	mux.HandleFunc("PUT /api/admin/users/{id}/role", a.requireAdmin(a.updateUserRole))
+	mux.HandleFunc("GET /api/admin/stats", a.requireAuth(a.requireAdmin(a.getAdminStats)))
+	mux.HandleFunc("GET /api/admin/moderations", a.requireAuth(a.requireAdmin(a.getAdminModerations)))
+	mux.HandleFunc("GET /api/admin/users", a.requireAuth(a.requireAdmin(a.getAdminUsers)))
+	mux.HandleFunc("PUT /api/admin/users/{id}/role", a.requireAuth(a.requireAdmin(a.updateUserRole)))
 
 	port := env("PORT", "8080")
 	log.Printf("backend listening on :%s", port)
