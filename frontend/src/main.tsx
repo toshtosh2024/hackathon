@@ -1450,7 +1450,7 @@ function ItemDetailScreen({
                     </select>
                   </div>
                 </div>
-                <button className="primary-button" onClick={startNegotiation} style={{ padding: "14px", marginTop: "8px" }}>
+                <button type="button" className="primary-button" onClick={startNegotiation} style={{ padding: "14px", marginTop: "8px" }}>
                   🤖 代理AI交渉を開始する
                 </button>
               </div>
@@ -1495,7 +1495,7 @@ function ItemDetailScreen({
                       </p>
                     )}
 
-                    <button className="primary-button" onClick={() => { setShowNegotiation(false); setNegotiationResult(null); }} style={{ padding: "12px" }}>
+                    <button type="button" className="primary-button" onClick={() => { setShowNegotiation(false); setNegotiationResult(null); }} style={{ padding: "12px" }}>
                       交渉室を閉じる
                     </button>
                   </div>
