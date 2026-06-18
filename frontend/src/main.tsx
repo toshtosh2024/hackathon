@@ -715,36 +715,44 @@ function HomeScreen({
   onRunDemo?: () => void;
 }) {
   return (
-    <section className="screen home-screen">
-      <div className="hero-banner">
-        <h2>次世代AI交渉 ＆ わらしべ物々交換フリマ</h2>
-        <p>エージェント交渉からマルチホップ物々交換、AI写真編集、Stripeエスクローまで完備した最先端フリマ</p>
-        {onRunDemo && (
-          <button 
-            onClick={onRunDemo} 
-            style={{ 
-              marginTop: "16px", 
-              background: "linear-gradient(135deg, #fbbf24, #d85b46)", 
-              color: "#ffffff", 
-              border: "none", 
-              padding: "12px 24px", 
-              borderRadius: "30px", 
-              fontWeight: 700, 
-              fontSize: "14px", 
-              cursor: "pointer", 
-              boxShadow: "0 4px 15px rgba(216, 91, 70, 0.4)",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px"
-            }}
-          >
-            <Sparkles size={16} /> ⚡ デモデータを自動投入（デモを実行）
-          </button>
-        )}
+    <section className="home-shell">
+      <div className="hero-card panel">
+        <div className="hero-copy">
+          <p className="eyebrow" style={{ color: "#d85b46", margin: 0 }}>Next Market</p>
+          <h2 style={{ fontSize: "28px", fontWeight: 800, margin: 0, color: "#1f2933" }}>次世代AI交渉 ＆ わらしべ物々交換フリマ</h2>
+          <p style={{ color: "#69756f", fontSize: "14px", margin: 0, lineHeight: "1.5" }}>
+            エージェント交渉からマルチホップ物々交換、AI写真編集、Stripeエスクローまで完備した最先端フリマ
+          </p>
+          {onRunDemo && (
+            <div className="hero-actions">
+              <button 
+                onClick={onRunDemo} 
+                className="primary-button"
+                style={{ 
+                  background: "linear-gradient(135deg, #fbbf24, #d85b46)", 
+                  color: "#ffffff", 
+                  border: "none", 
+                  padding: "12px 24px", 
+                  borderRadius: "30px", 
+                  fontWeight: 700, 
+                  fontSize: "14px", 
+                  cursor: "pointer", 
+                  boxShadow: "0 4px 15px rgba(216, 91, 70, 0.4)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px"
+                }}
+              >
+                <Sparkles size={16} /> ⚡ デモデータを自動投入（デモを実行）
+              </button>
+            </div>
+          )}
+        </div>
+        <img className="hero-image" src="/placeholder.svg" alt="" style={{ borderRadius: "18px" }} />
       </div>
 
-      <div className="search-row">
-        <div className="search-box">
+      <div className="filter-bar">
+        <div className="search-field">
           <Search size={18} />
           <input
             placeholder="欲しい商品名で検索..."
@@ -755,6 +763,7 @@ function HomeScreen({
         <select
           value={filters.category}
           onChange={(e) => onFiltersChange({ ...filters, category: e.target.value })}
+          style={{ background: "#ffffff", border: "1px solid #ddd1c4", borderRadius: "18px", padding: "10px 14px", color: "#1f2933" }}
         >
           <option value="">すべてのカテゴリー</option>
           {CATEGORIES.map((cat) => (
@@ -763,6 +772,20 @@ function HomeScreen({
             </option>
           ))}
         </select>
+        <input
+          type="number"
+          placeholder="最安 (円)"
+          value={filters.min_price}
+          onChange={(e) => onFiltersChange({ ...filters, min_price: e.target.value })}
+          style={{ padding: "10px 14px", border: "1px solid #ddd1c4", borderRadius: "18px", background: "#ffffff" }}
+        />
+        <input
+          type="number"
+          placeholder="最高 (円)"
+          value={filters.max_price}
+          onChange={(e) => onFiltersChange({ ...filters, max_price: e.target.value })}
+          style={{ padding: "10px 14px", border: "1px solid #ddd1c4", borderRadius: "18px", background: "#ffffff" }}
+        />
       </div>
 
       {itemsLoading ? (
@@ -770,11 +793,11 @@ function HomeScreen({
       ) : itemsError ? (
         <p className="error">{itemsError}</p>
       ) : (
-        <section className="catalog-grid">
+        <section className="card-grid">
           {items.map((item) => (
             <article key={item.id} className="catalog-card" onClick={() => onOpenItem(item.id)}>
               <img src={getPublicUrl(item.imageUrl) || "/placeholder.svg"} alt="" />
-              <div className="catalog-card-body">
+              <div>
                 <strong>{item.title}</strong>
                 <span>¥{item.price.toLocaleString()}</span>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#7d8b99", marginTop: "4px" }}>
