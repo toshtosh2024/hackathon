@@ -9,7 +9,20 @@ import (
 // It resets the database and seeds high-fidelity mock data to support
 // immediate, flawless demonstration of AI price negotiation and the 3-party Barter Loop.
 func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
-	currentUserRecord := currentUser(r)
+	var currentUserRecord user
+	if u := currentUser(r); u.ID != 0 {
+		currentUserRecord = u
+	} else {
+		// Public visitors get auto-created/logged into the default "Aさん" (ID 9991) demo account!
+		currentUserRecord = user{
+			ID:        9991,
+			Name:      "Aさん",
+			Email:     "a@example.com",
+			Role:      "user",
+			AvatarURL: "",
+		}
+	}
+
 	databaseConnection := a.dbHandle()
 	if databaseConnection == nil {
 		writeError(w, http.StatusServiceUnavailable, "database unavailable")
@@ -28,6 +41,11 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 	// [Step 1]: Ensure Mock Demo Accounts exist in the system
 	// -------------------------------------------------------------------------
 	
+	// Create "Aさん" (User 9991) - Default Demo Account for public visitors
+	_, _ = databaseTransaction.ExecContext(r.Context(), `
+		INSERT IGNORE INTO users (id, name, email, password_hash, role) 
+		VALUES (9991, 'Aさん', 'a@example.com', 'demo_hash_9991', 'user')`)
+
 	// Create "Gadget Taro" (User 9992) - Owner of Item A and Item C
 	_, _ = databaseTransaction.ExecContext(r.Context(), `
 		INSERT IGNORE INTO users (id, name, email, password_hash, role) 
@@ -181,5 +199,7 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 		"status":          "success",
 		"message":         "デモデータの自動セットアップ（清算差額調整、3者間Pendingループ、iPhone Active）が完了しました！",
 		"negotiateItemId": 9901,
+		"token":           a.signToken(currentUserRecord),
+		"user":            currentUserRecord,
 	})
 }

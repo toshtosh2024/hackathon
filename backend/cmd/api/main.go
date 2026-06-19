@@ -204,7 +204,7 @@ func main() {
 	mux.Handle("GET /uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(env("UPLOAD_DIR", "uploads")))))
 	mux.HandleFunc("POST /api/profile", a.requireAuth(a.updateProfile))
 	mux.HandleFunc("POST /api/profile/password", a.requireAuth(a.changePassword))
-	mux.HandleFunc("POST /api/demo/seed", a.requireAuth(a.seedDemo))
+	mux.HandleFunc("POST /api/demo/seed", a.seedDemo)
 	mux.HandleFunc("GET /api/my/items", a.requireAuth(a.listMyItems))
 	mux.HandleFunc("GET /api/my/stats", a.requireAuth(a.getMyStats))
 

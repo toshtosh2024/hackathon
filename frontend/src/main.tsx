@@ -353,8 +353,11 @@ function App() {
 
   async function runDemoSeeder() {
     try {
-      const data = await api<{ status: string; message: string }>("/demo/seed", { method: "POST" });
+      const data = await api<{ status: string; message: string; token?: string; user?: User }>("/demo/seed", { method: "POST" });
       setNotice(data.message);
+      if (data.token && data.user) {
+        saveSession(data.token, data.user);
+      }
       await Promise.all([loadItems(), loadConversations(), loadMyItems()]);
       setAutoPilot(true);
       setDemoTourActive(false);
