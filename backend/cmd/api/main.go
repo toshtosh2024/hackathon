@@ -22,8 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getsentry/sentry-go"
-	sentryhttp "github.com/getsentry/sentry-go/http"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 	"next-market/backend/migrations"
@@ -139,24 +137,6 @@ func main() {
 		}
 	}
 
-	// Initialize Sentry SDK for real-time observability and crash detection
-	sentryDSN := os.Getenv("SENTRY_DSN")
-	if sentryDSN != "" {
-		err := sentry.Init(sentry.ClientOptions{
-			Dsn:              sentryDSN,
-			AttachStacktrace: true,
-			EnableTracing:    true,
-			TracesSampleRate: 1.0,
-			Environment:      env("APP_ENV", "production"),
-		})
-		if err != nil {
-			log.Printf("Sentry initialization failed: %v", err)
-		} else {
-			log.Println("Sentry SDK initialized successfully. Real-time observability active.")
-			defer sentry.Flush(2 * time.Second)
-		}
-	}
-
 	dbDSN, err := dsn()
 	if err != nil {
 		log.Fatalf("failed to build DSN: %v", err)
@@ -247,17 +227,9 @@ func main() {
 	mux.HandleFunc("GET /api/admin/users", a.requireAuth(a.requireAdmin(a.getAdminUsers)))
 	mux.HandleFunc("PUT /api/admin/users/{id}/role", a.requireAuth(a.requireAdmin(a.updateUserRole)))
 
-	var handler http.Handler = a.cors(withFrontend(a.guardDB(mux)))
-	if sentryDSN != "" {
-		sentryHandler := sentryhttp.New(sentryhttp.Options{
-			Repanic: true,
-		})
-		handler = sentryHandler.Handle(handler)
-	}
-
 	port := env("PORT", "8080")
 	log.Printf("backend listening on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, handler))
+	log.Fatal(http.ListenAndServe(":"+port, a.cors(withFrontend(a.guardDB(mux)))))
 }
 
 func (a *app) cors(next http.Handler) http.Handler {
