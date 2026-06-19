@@ -37,6 +37,8 @@ gcloud builds submit --project term9-toshiie-shiomi --config cloudbuild.yaml .
 
 `cloudbuild.yaml` also deploys the pushed image to Cloud Run. Automatic deploys on GitHub `main` pushes use the Cloud Build GitHub connection:
 
+Every deployment explicitly re-applies the Terraform-managed runtime service account, uploads bucket, and Cloud SQL connection. Image uploads use Cloud Run Application Default Credentials; no GCS private key is stored in Secret Manager.
+
 - Connection: `tosh`
 - Connection region: `us-central1`
 - Provider account: `Tk-visionary`
@@ -55,6 +57,15 @@ cd infra/terraform
 GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token)" terraform apply
 terraform output cloud_run_url
 ```
+
+If the service was previously deployed without the storage settings, repair the live revision once with:
+
+```bash
+cd ../..
+./scripts/stabilize-cloud-run-storage.sh
+```
+
+The script verifies that the bucket exists, grants the runtime service account object creation permission, preserves public product-image reads, and updates `GCS_BUCKET` on Cloud Run.
 
 To rotate the OpenAI key after deployment:
 

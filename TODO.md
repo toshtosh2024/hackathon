@@ -44,6 +44,8 @@
 - Added separate local and Cloud Storage persistence implementations behind the backend image storage interface.
 - Added byte-level image validation, a 10 MB limit, stable Japanese errors, and backend upload regression tests.
 - Reduced home catalog image height to half of the previous square area.
+- Bound every Cloud Build deployment to the Terraform-managed runtime service account, uploads bucket, and Cloud SQL connection.
+- Removed the obsolete GCS private-key secret flow; Cloud Run now writes to GCS exclusively through Application Default Credentials and bucket IAM.
 
 ### 2026-06-17
 

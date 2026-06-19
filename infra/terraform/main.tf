@@ -97,25 +97,6 @@ resource "google_storage_bucket" "uploads" {
   depends_on = [google_project_service.services]
 }
 
-resource "google_service_account_key" "cloud_run_upload_signer" {
-  service_account_id = google_service_account.cloud_run.name
-}
-
-resource "google_secret_manager_secret" "gcs_private_key" {
-  secret_id = "${var.app_name}-gcs-private-key"
-
-  replication {
-    auto {}
-  }
-
-  depends_on = [google_project_service.services]
-}
-
-resource "google_secret_manager_secret_version" "gcs_private_key" {
-  secret      = google_secret_manager_secret.gcs_private_key.id
-  secret_data = jsondecode(base64decode(google_service_account_key.cloud_run_upload_signer.private_key)).private_key
-}
-
 resource "google_sql_database_instance" "mysql" {
   name             = local.cloud_sql_instance
   database_version = "MYSQL_8_0"
@@ -187,12 +168,6 @@ resource "google_secret_manager_secret_iam_member" "cloud_run_jwt_secret" {
 
 resource "google_secret_manager_secret_iam_member" "cloud_run_openai_api_key" {
   secret_id = data.google_secret_manager_secret.openai_api_key.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.cloud_run.email}"
-}
-
-resource "google_secret_manager_secret_iam_member" "cloud_run_gcs_private_key" {
-  secret_id = google_secret_manager_secret.gcs_private_key.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.cloud_run.email}"
 }
@@ -327,21 +302,6 @@ resource "google_cloud_run_v2_service" "app" {
         value = google_storage_bucket.uploads.name
       }
 
-      env {
-        name  = "GCS_CLIENT_EMAIL"
-        value = google_service_account.cloud_run.email
-      }
-
-      env {
-        name = "GCS_PRIVATE_KEY"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.gcs_private_key.secret_id
-            version = "latest"
-          }
-        }
-      }
-
       resources {
         limits = {
           cpu    = "1"
@@ -362,8 +322,6 @@ resource "google_cloud_run_v2_service" "app" {
     google_secret_manager_secret_iam_member.cloud_run_db_password,
     google_secret_manager_secret_iam_member.cloud_run_jwt_secret,
     google_secret_manager_secret_iam_member.cloud_run_openai_api_key,
-    google_secret_manager_secret_iam_member.cloud_run_gcs_private_key,
-    google_secret_manager_secret_version.gcs_private_key,
     google_storage_bucket_iam_member.cloud_run_upload_object_creator,
   ]
 }
@@ -398,11 +356,14 @@ resource "google_cloudbuild_trigger" "github_main" {
   }
 
   substitutions = {
-    _REGION     = var.region
-    _REPOSITORY = local.repository_id
-    _IMAGE      = var.app_name
-    _SERVICE    = local.service_name
-    _TAG        = var.image_tag
+    _REGION                  = var.region
+    _REPOSITORY              = local.repository_id
+    _IMAGE                   = var.app_name
+    _SERVICE                 = local.service_name
+    _TAG                     = var.image_tag
+    _RUNTIME_SERVICE_ACCOUNT = google_service_account.cloud_run.email
+    _UPLOADS_BUCKET          = google_storage_bucket.uploads.name
+    _CLOUD_SQL_CONNECTION    = google_sql_database_instance.mysql.connection_name
   }
 
   depends_on = [

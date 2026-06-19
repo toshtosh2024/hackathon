@@ -21,14 +21,24 @@ steps:
       - ${_REGION}
       - --project
       - $PROJECT_ID
+      - --service-account
+      - ${_RUNTIME_SERVICE_ACCOUNT}
+      - --update-env-vars
+      - GCS_BUCKET=${_UPLOADS_BUCKET}
+      - --add-cloudsql-instances
+      - ${_CLOUD_SQL_CONNECTION}
       - --quiet
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE}:${_TAG}
 options:
   logging: CLOUD_LOGGING_ONLY
+  dynamicSubstitutions: true
 substitutions:
   _REGION: asia-northeast1
   _REPOSITORY: next-market-repo
   _IMAGE: next-market
   _SERVICE: next-market
   _TAG: latest
+  _RUNTIME_SERVICE_ACCOUNT: next-market-run@${PROJECT_ID}.iam.gserviceaccount.com
+  _UPLOADS_BUCKET: ${PROJECT_ID}-next-market-uploads
+  _CLOUD_SQL_CONNECTION: ${PROJECT_ID}:asia-northeast1:next-market-mysql
