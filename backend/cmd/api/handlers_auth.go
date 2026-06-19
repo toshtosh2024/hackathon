@@ -79,17 +79,47 @@ func (a *app) updateProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name cannot be empty")
 		return
 	}
+	avatarRef, err := resolveAvatarReference(req.AvatarPath, req.AvatarURL, u.AvatarURL, env("GCS_BUCKET", ""))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
-	_, err := a.dbHandle().ExecContext(r.Context(),
+	_, err = a.dbHandle().ExecContext(r.Context(),
 		"UPDATE users SET name = ?, avatar_url = ? WHERE id = ?",
-		req.Name, req.AvatarURL, u.ID,
+		req.Name, avatarRef, u.ID,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update profile")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	u.Name = req.Name
+	u.AvatarURL = avatarRef
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"token":  a.signToken(u),
+		"user":   u,
+	})
+}
+
+func resolveAvatarReference(avatarPath, avatarURL, currentAvatar, bucket string) (string, error) {
+	if ref := strings.TrimSpace(avatarPath); ref != "" {
+		if strings.HasPrefix(ref, "/uploads/avatar-") {
+			return ref, nil
+		}
+		if bucket != "" && strings.HasPrefix(ref, "gcs://"+bucket+"/avatar-images/") {
+			return ref, nil
+		}
+		return "", errors.New("invalid avatar upload path")
+	}
+	if ref := strings.TrimSpace(avatarURL); ref != "" {
+		if strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "http://") {
+			return ref, nil
+		}
+		return "", errors.New("invalid avatar URL")
+	}
+	return currentAvatar, nil
 }
 
 func (a *app) hashPassword(password string) string {

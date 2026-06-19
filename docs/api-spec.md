@@ -216,7 +216,21 @@ Request:
 ```json
 {
   "name": "Toshi",
-  "avatarPath": "gcs://nextmarket/avatars/..."
+  "avatarPath": "gcs://nextmarket/avatar-images/..."
+}
+```
+
+Returns the updated user and a newly signed token. The client must replace the stored session atomically so the profile-photo update does not invalidate navigation state.
+
+```json
+{
+  "status": "ok",
+  "token": "...",
+  "user": {
+    "id": 1,
+    "name": "Toshi",
+    "avatarUrl": "gcs://nextmarket/avatar-images/..."
+  }
 }
 ```
 

@@ -19,6 +19,34 @@ func TestTokenPreservesAvatarURL(t *testing.T) {
 	}
 }
 
+func TestResolveAvatarReference(t *testing.T) {
+	bucket := "project-next-market-uploads"
+	tests := []struct {
+		name, path, url, current, want string
+		wantErr                        bool
+	}{
+		{name: "GCS upload", path: "gcs://project-next-market-uploads/avatar-images/123.jpg", want: "gcs://project-next-market-uploads/avatar-images/123.jpg"},
+		{name: "local upload", path: "/uploads/avatar-123.png", want: "/uploads/avatar-123.png"},
+		{name: "preserve current", current: "https://example.com/old.jpg", want: "https://example.com/old.jpg"},
+		{name: "legacy URL", url: "https://example.com/avatar.jpg", want: "https://example.com/avatar.jpg"},
+		{name: "different bucket", path: "gcs://attacker/avatar-images/x.jpg", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveAvatarReference(tc.path, tc.url, tc.current, bucket)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("got %q, err %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseGCSRef(t *testing.T) {
 	bucket, objectName, err := parseGCSRef("gcs://nextmarket/avatars/user-1.jpg")
 	if err != nil {
@@ -178,4 +206,3 @@ func BenchmarkFormatHistory(b *testing.B) {
 		_ = formatHistory(history)
 	}
 }
-

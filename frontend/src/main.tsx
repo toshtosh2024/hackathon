@@ -276,11 +276,18 @@ function App() {
     void loadMyItems();
   }, [token]);
 
-  const updateSession = (nextToken: string, nextUser: User) => {
+  const saveSession = (nextToken: string, nextUser: User) => {
+    if (!nextToken || !nextUser?.id) {
+      throw new Error("セッション更新の応答が不正です。もう一度お試しください");
+    }
     setToken(nextToken);
     setUser(nextUser);
     localStorage.setItem("token", nextToken);
     localStorage.setItem("user", JSON.stringify(nextUser));
+  };
+
+  const updateSession = (nextToken: string, nextUser: User) => {
+    saveSession(nextToken, nextUser);
     navigate({ page: "home" });
   };
 
@@ -478,7 +485,7 @@ function App() {
               myItems={myItems}
               conversations={conversations}
               api={api}
-              onSessionUpdated={updateSession}
+              onSessionUpdated={saveSession}
               onOpenSell={() => navigate({ page: "sell" })}
               onOpenItem={(itemId) => navigate({ page: "item", itemId })}
               onCancelled={async (itemId) => {
