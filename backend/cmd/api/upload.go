@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -141,6 +140,6 @@ func imageExtension(contentType string) string {
 	case "image/gif":
 		return ".gif"
 	default:
-		panic(errors.New("unsupported image content type"))
+		return ".jpg"
 	}
 }

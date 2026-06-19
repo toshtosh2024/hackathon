@@ -123,7 +123,11 @@ func (a *app) doGeminiRequest(ctx context.Context, apiKey string, reqBody gemini
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("Gemini API error %d: %s", resp.StatusCode, string(respBody))
+		errMsg := string(respBody)
+		if len(errMsg) > 512 {
+			errMsg = errMsg[:512] + "... (truncated)"
+		}
+		return "", fmt.Errorf("Gemini API error %d: %s", resp.StatusCode, errMsg)
 	}
 
 	var gemRes geminiResponse
@@ -194,6 +198,9 @@ func (a *app) photoAppraise(w http.ResponseWriter, r *http.Request) {
 		visionResult.Title = "商品（詳細不明）"
 		visionResult.Category = "その他"
 		visionResult.SearchKeyword = "フリマ 商品"
+	}
+	if strings.TrimSpace(visionResult.SearchKeyword) == "" {
+		visionResult.SearchKeyword = visionResult.Title
 	}
 
 	// Step 2: Google Search grounding で日本のフリマ相場を調査

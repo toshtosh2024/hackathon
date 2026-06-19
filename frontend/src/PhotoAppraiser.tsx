@@ -42,9 +42,22 @@ export function PhotoAppraiser({ api, onApply }: PhotoAppraiserProps) {
   const [result, setResult] = useState<AppraiseResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+  const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+      setError("JPEG・PNG・WebP・GIF形式の画像を選択してください");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setError("画像は1枚10MB以下にしてください");
+      return;
+    }
+
     setImageFile(file);
     setResult(null);
     setError(null);
