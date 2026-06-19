@@ -318,31 +318,6 @@ func (a *app) cancelItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
-func (a *app) createUploadURL(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Filename    string `json:"filename"`
-		ContentType string `json:"contentType"`
-	}
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	if req.Filename == "" || req.ContentType == "" {
-		writeError(w, http.StatusBadRequest, "filename and contentType are required")
-		return
-	}
-
-	uploadURL, publicURL, _, err := signedGCSUploadURL("item-images", req.Filename, req.ContentType)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{
-		"uploadUrl": uploadURL,
-		"publicUrl": publicURL,
-	})
-}
-
 func (a *app) listItemReviews(w http.ResponseWriter, r *http.Request) {
 	itemID, ok := pathID(w, r)
 	if !ok {

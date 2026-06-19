@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { UploadCloud, TrendingUp, PackagePlus, Star } from "lucide-react";
 import { User, Item, Conversation, PersonalStats, getPublicUrl } from "./types";
+import { uploadImage } from "./uploadImage";
 
 interface BarterMemberDetail {
   id: number;
@@ -169,21 +170,10 @@ export function MyPageScreen({
     setUploading(true);
     setProfileError("");
     try {
-      const signed = await api<{ uploadUrl: string; objectPath: string; contentType: string }>("/upload", {
-        method: "POST",
-        body: JSON.stringify({ filename: file.name, contentType: file.type, purpose: "avatar", visibility: "private" })
-      });
-      const response = await fetch(signed.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": signed.contentType },
-        body: file
-      });
-      if (!response.ok) {
-        throw new Error("プロフィール画像のアップロードに失敗しました");
-      }
+      const uploaded = await uploadImage(api, file, "avatar");
       const updated = await api<{ user: User; token: string }>("/profile", {
         method: "POST",
-        body: JSON.stringify({ avatarPath: signed.objectPath, name: user.name })
+        body: JSON.stringify({ avatarPath: uploaded.objectPath, name: user.name })
       });
       onSessionUpdated(updated.token, updated.user);
     } catch (err) {

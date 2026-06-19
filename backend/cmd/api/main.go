@@ -123,13 +123,19 @@ type app struct {
 	db            *sql.DB
 	jwtSecret     string
 	allowedOrigin string
+	imageStore    imageStore
 	dbErr         error
 	dbMu          sync.RWMutex
 }
 
 func main() {
 	_ = os.Setenv("TZ", "UTC")
-	_ = godotenv.Load()
+	// .env を複数の候補パスから順に探す（go run / ビルド済みバイナリ どちらの実行位置でも動作する）
+	for _, p := range []string{".env", "../.env", "../../.env"} {
+		if err := godotenv.Load(p); err == nil {
+			break
+		}
+	}
 
 	dbDSN, err := dsn()
 	if err != nil {
@@ -161,6 +167,12 @@ func main() {
 		jwtSecret:     env("JWT_SECRET", "super-secret-key"),
 		allowedOrigin: env("ALLOWED_ORIGIN", "http://localhost:5173"),
 	}
+	uploadStore, closeUploadStore, err := newImageStore(context.Background())
+	if err != nil {
+		log.Fatalf("failed to initialize image storage: %v", err)
+	}
+	defer closeUploadStore()
+	a.imageStore = uploadStore
 	go a.initDBLoop()
 
 	mux := http.NewServeMux()
@@ -188,7 +200,8 @@ func main() {
 	mux.HandleFunc("POST /api/items/{id}/ai-scene", a.requireAuth(a.generateItemScene))
 	mux.HandleFunc("POST /api/items/{id}/ai-video", a.requireAuth(a.generateSceneVideo))
 	mux.HandleFunc("POST /api/items/{id}/cancel", a.requireAuth(a.cancelItem))
-	mux.HandleFunc("POST /api/upload", a.requireAuth(a.createUploadURL))
+	mux.HandleFunc("POST /api/uploads", a.requireAuth(a.uploadImage))
+	mux.Handle("GET /uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(env("UPLOAD_DIR", "uploads")))))
 	mux.HandleFunc("POST /api/profile", a.requireAuth(a.updateProfile))
 	mux.HandleFunc("POST /api/profile/password", a.requireAuth(a.changePassword))
 	mux.HandleFunc("POST /api/demo/seed", a.requireAuth(a.seedDemo))
@@ -242,7 +255,7 @@ func withFrontend(api http.Handler) http.Handler {
 	}
 	fileServer := http.FileServer(http.Dir(staticDir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api") {
+		if strings.HasPrefix(r.URL.Path, "/api") || strings.HasPrefix(r.URL.Path, "/uploads/") {
 			api.ServeHTTP(w, r)
 			return
 		}

@@ -208,7 +208,9 @@ function App() {
   // 共通の共通型安全 fetch API クライアント
   async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
     const headers = new Headers(options.headers);
-    headers.set("Content-Type", "application/json");
+    if (!(options.body instanceof FormData) && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
     if (token) headers.set("Authorization", `Bearer ${token}`);
     const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
     

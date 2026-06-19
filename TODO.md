@@ -26,7 +26,7 @@
 ## Phase 4: Polish
 
 - [x] Improve UI/UX for demo flow.
-- [x] Add image upload flow with Cloud Storage signed URLs.
+- [x] Add a backend-mediated image upload flow with interchangeable local and Cloud Storage persistence.
 - [x] Add item search and filters.
 - [x] Stabilize Cloud Run DB startup for login.
 - [x] Add profile avatar upload and DM item summary.
@@ -37,6 +37,13 @@
 - [ ] Prepare demo script.
 
 ## Work Log
+
+### 2026-06-19
+
+- Replaced duplicated browser-to-GCS PUT flows with one reusable frontend image uploader and one authenticated multipart API.
+- Added separate local and Cloud Storage persistence implementations behind the backend image storage interface.
+- Added byte-level image validation, a 10 MB limit, stable Japanese errors, and backend upload regression tests.
+- Reduced home catalog image height to half of the previous square area.
 
 ### 2026-06-17
 
@@ -62,8 +69,8 @@
 
 ### 2026-06-18
 
-- Added `POST /api/upload` to issue Cloud Storage signed URLs for direct image uploads.
-- Added `GCS_BUCKET`, `GCS_CLIENT_EMAIL`, and `GCS_PRIVATE_KEY` to backend environment examples.
+- Initially added `POST /api/upload` for direct Cloud Storage uploads; replaced on 2026-06-19 by the stable `POST /api/uploads` multipart flow.
+- Added `GCS_BUCKET` configuration for Cloud Storage uploads.
 - Added keyword, category, and price-range filters to `GET /api/items`.
 - Updated the home screen with search/filter controls, loading state, and Japanese error messages.
 - Updated the sell screen with image file selection, upload progress, image preview, and submit error handling.

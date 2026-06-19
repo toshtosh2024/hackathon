@@ -7,6 +7,7 @@ import React, { useState, FormEvent } from "react";
 import { Sparkles, UploadCloud } from "lucide-react";
 import { Item, CATEGORIES } from "./types";
 import { PhotoAppraiser, AppraiseResult } from "./PhotoAppraiser";
+import { uploadImage } from "./uploadImage";
 
 interface SellScreenProps {
   api: <T>(path: string, options?: RequestInit) => Promise<T>;
@@ -87,17 +88,8 @@ export function SellScreen({
     try {
       const urls: string[] = [];
       for (const file of imageFiles) {
-        const signed = await api<{ uploadUrl: string; publicUrl: string }>("/upload", {
-          method: "POST",
-          body: JSON.stringify({ filename: file.name, contentType: file.type })
-        });
-        const uploadResponse = await fetch(signed.uploadUrl, {
-          method: "PUT",
-          headers: { "Content-Type": file.type },
-          body: file
-        });
-        if (!uploadResponse.ok) throw new Error("GCS Upload failed");
-        urls.push(signed.publicUrl);
+        const uploaded = await uploadImage(api, file, "item");
+        urls.push(uploaded.publicUrl);
       }
 
       const item = await api<{ item: Item }>("/items", {

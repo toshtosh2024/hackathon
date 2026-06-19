@@ -100,34 +100,22 @@ Authorization: `Bearer <token>`
 
 Returns all items created by the current user, including hidden items.
 
-### POST /upload
+### POST /uploads
 
 Authorization: `Bearer <token>`
 
-Issues a Cloud Storage signed URL for direct image upload.
+Uploads one image through the API. The storage implementation is selected by the backend, so screens do not depend on Cloud Storage or its CORS settings.
 
-Request:
+Request: `multipart/form-data` with a `file` part and a required `purpose` field (`item` or `avatar`). JPEG, PNG, WebP, and GIF are accepted up to 10 MB. The backend validates the file bytes rather than trusting the filename.
 
-```json
-{
-  "filename": "bag.jpg",
-  "contentType": "image/jpeg",
-  "purpose": "item"
-}
-```
-
-`purpose` is optional. Use `item` for listing images and `avatar` for profile images. Objects are stored under matching Cloud Storage prefixes.
-Set `visibility` to `private` for non-public uploads such as profile photos.
-When GCS environment variables are not set in local development, the backend falls back to `PUT /api/local-upload` and serves files from `/uploads`.
+When `GCS_BUCKET` is set, the backend writes through Application Default Credentials. Otherwise it stores files under `UPLOAD_DIR` (default: `uploads`) and serves them from `/uploads/`.
 
 Response:
 
 ```json
 {
-  "uploadUrl": "https://storage.googleapis.com/...",
   "publicUrl": "https://storage.googleapis.com/nextmarket/items/...",
   "objectPath": "gcs://nextmarket/avatars/...",
-  "method": "PUT",
   "contentType": "image/jpeg"
 }
 ```
