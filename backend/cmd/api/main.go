@@ -564,6 +564,51 @@ type imageUpload struct {
 	Bytes       []byte
 }
 
+// callOpenAIImageGenerate は DALL-E 3 でテキストプロンプトから画像を生成します。
+// callGeminiImageGenerate が失敗した際のフォールバックとして使用します。
+func (a *app) callOpenAIImageGenerate(ctx context.Context, prompt string) ([]byte, error) {
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if apiKey == "" {
+		return nil, errors.New("missing OPENAI_API_KEY")
+	}
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model":           "dall-e-3",
+		"prompt":          prompt,
+		"n":               1,
+		"size":            "1024x1024",
+		"response_format": "b64_json",
+	})
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/images/generations", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("DALL-E 3 API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var res struct {
+		Data []struct {
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &res); err != nil {
+		return nil, err
+	}
+	if len(res.Data) == 0 {
+		return nil, errors.New("DALL-E 3 returned no image data")
+	}
+	return base64.StdEncoding.DecodeString(res.Data[0].B64JSON)
+}
+
 func (a *app) callOpenAIImageEdit(ctx context.Context, prompt string, uploads []imageUpload) ([]byte, error) {
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {

@@ -198,14 +198,22 @@ func (a *app) generateItemScene(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prompt := itemScenePrompt(storedUser.Name, it)
-	// Gemini 2.0 Flash Exp で合成画像生成（OpenAI /v1/images/edits は mask 形式の誤用で動作しなかったため切り替え）
-	generatedBytes, generatedMIME, err := a.callGeminiImageGenerate(r.Context(), prompt, []imageUpload{
+
+	// Gemini 2.0 Flash Exp で合成画像生成を試みる
+	generatedBytes, generatedMIME, geminiErr := a.callGeminiImageGenerate(r.Context(), prompt, []imageUpload{
 		{Filename: "avatar.jpg", ContentType: avatarType, Bytes: avatarBytes},
 		{Filename: "item.jpg", ContentType: itemType, Bytes: itemBytes},
 	})
-	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
+	if geminiErr != nil {
+		// Gemini 失敗時は DALL-E 3 テキスト→画像生成にフォールバック
+		log.Printf("Gemini image generation failed (item=%d): %v — falling back to DALL-E 3", itemID, geminiErr)
+		dallEBytes, dallEErr := a.callOpenAIImageGenerate(r.Context(), prompt)
+		if dallEErr != nil {
+			writeError(w, http.StatusBadGateway, fmt.Sprintf("AI画像生成に失敗しました。しばらくしてから再試行してください。(Gemini: %v / DALL-E: %v)", geminiErr, dallEErr))
+			return
+		}
+		generatedBytes = dallEBytes
+		generatedMIME = "image/png"
 	}
 
 	if generatedMIME == "" {
