@@ -565,24 +565,38 @@ type imageUpload struct {
 	Bytes       []byte
 }
 
-// callOpenAIImageGenerate は DALL-E 3 でテキストプロンプトから画像を生成します。
-// callGeminiImageGenerate が失敗した際のフォールバックとして使用します。
-func (a *app) callOpenAIImageGenerate(ctx context.Context, prompt string) ([]byte, error) {
+// callOpenAIImageGenerate は gpt-image-2 の /v1/images/edits で
+// ユーザーアバター画像＋商品画像を合成し、使用シーン画像を生成します。
+func (a *app) callOpenAIImageGenerate(ctx context.Context, prompt string, uploads []imageUpload) ([]byte, error) {
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
 		return nil, errors.New("missing OPENAI_API_KEY")
 	}
 
-	reqBody, _ := json.Marshal(map[string]any{
-		"model":           "gpt-image-2",
-		"prompt":          prompt,
-		"n":               1,
-		"size":            "1024x1024",
-		"response_format": "b64_json",
-	})
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/images/generations", bytes.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
+	_ = writer.WriteField("model", "gpt-image-2")
+	_ = writer.WriteField("prompt", prompt)
+	_ = writer.WriteField("n", "1")
+	_ = writer.WriteField("size", "1024x1024")
+	_ = writer.WriteField("response_format", "b64_json")
+
+	// 複数画像を image[] フィールドで送信（gpt-image-2 の複数画像合成形式）
+	for _, up := range uploads {
+		h := make(textproto.MIMEHeader)
+		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image[]"; filename="%s"`, up.Filename))
+		h.Set("Content-Type", up.ContentType)
+		part, err := writer.CreatePart(h)
+		if err != nil {
+			return nil, err
+		}
+		_, _ = part.Write(up.Bytes)
+	}
+	_ = writer.Close()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/images/edits", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
@@ -598,35 +612,18 @@ func (a *app) callOpenAIImageGenerate(ctx context.Context, prompt string) ([]byt
 
 	var res struct {
 		Data []struct {
-			URL     string `json:"url"`
 			B64JSON string `json:"b64_json"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &res); err != nil {
 		return nil, err
 	}
-	if len(res.Data) == 0 {
-		return nil, errors.New("DALL-E 3 returned no image data")
+	if len(res.Data) == 0 || res.Data[0].B64JSON == "" {
+		return nil, errors.New("gpt-image-2 returned no image data")
 	}
-
-	// b64_json があればそれを使用、なければ URL からダウンロード
-	if res.Data[0].B64JSON != "" {
-		return base64.StdEncoding.DecodeString(res.Data[0].B64JSON)
-	}
-	if res.Data[0].URL == "" {
-		return nil, errors.New("DALL-E 3 returned neither url nor b64_json")
-	}
-	imgReq, err := http.NewRequestWithContext(ctx, http.MethodGet, res.Data[0].URL, nil)
-	if err != nil {
-		return nil, err
-	}
-	imgResp, err := http.DefaultClient.Do(imgReq)
-	if err != nil {
-		return nil, err
-	}
-	defer imgResp.Body.Close()
-	return io.ReadAll(imgResp.Body)
+	return base64.StdEncoding.DecodeString(res.Data[0].B64JSON)
 }
+
 
 func (a *app) callOpenAIImageEdit(ctx context.Context, prompt string, uploads []imageUpload) ([]byte, error) {
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))

@@ -207,7 +207,10 @@ func (a *app) generateItemScene(w http.ResponseWriter, r *http.Request) {
 	if geminiErr != nil {
 		// Gemini 失敗時は DALL-E 3 テキスト→画像生成にフォールバック
 		log.Printf("Gemini image generation failed (item=%d): %v — falling back to DALL-E 3", itemID, geminiErr)
-		dallEBytes, dallEErr := a.callOpenAIImageGenerate(r.Context(), prompt)
+		dallEBytes, dallEErr := a.callOpenAIImageGenerate(r.Context(), prompt, []imageUpload{
+			{Filename: "avatar.jpg", ContentType: avatarType, Bytes: avatarBytes},
+			{Filename: "item.jpg", ContentType: itemType, Bytes: itemBytes},
+		})
 		if dallEErr != nil {
 			writeError(w, http.StatusBadGateway, fmt.Sprintf("AI画像生成に失敗しました。しばらくしてから再試行してください。(Gemini: %v / DALL-E: %v)", geminiErr, dallEErr))
 			return
