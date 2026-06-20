@@ -573,11 +573,10 @@ func (a *app) callOpenAIImageGenerate(ctx context.Context, prompt string) ([]byt
 	}
 
 	reqBody, _ := json.Marshal(map[string]any{
-		"model":           "dall-e-3",
-		"prompt":          prompt,
-		"n":               1,
-		"size":            "1024x1024",
-		"response_format": "b64_json",
+		"model":  "dall-e-3",
+		"prompt": prompt,
+		"n":      1,
+		"size":   "1024x1024",
 	})
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/images/generations", bytes.NewReader(reqBody))
@@ -597,6 +596,7 @@ func (a *app) callOpenAIImageGenerate(ctx context.Context, prompt string) ([]byt
 
 	var res struct {
 		Data []struct {
+			URL     string `json:"url"`
 			B64JSON string `json:"b64_json"`
 		} `json:"data"`
 	}
@@ -606,7 +606,24 @@ func (a *app) callOpenAIImageGenerate(ctx context.Context, prompt string) ([]byt
 	if len(res.Data) == 0 {
 		return nil, errors.New("DALL-E 3 returned no image data")
 	}
-	return base64.StdEncoding.DecodeString(res.Data[0].B64JSON)
+
+	// b64_json があればそれを使用、なければ URL からダウンロード
+	if res.Data[0].B64JSON != "" {
+		return base64.StdEncoding.DecodeString(res.Data[0].B64JSON)
+	}
+	if res.Data[0].URL == "" {
+		return nil, errors.New("DALL-E 3 returned neither url nor b64_json")
+	}
+	imgReq, err := http.NewRequestWithContext(ctx, http.MethodGet, res.Data[0].URL, nil)
+	if err != nil {
+		return nil, err
+	}
+	imgResp, err := http.DefaultClient.Do(imgReq)
+	if err != nil {
+		return nil, err
+	}
+	defer imgResp.Body.Close()
+	return io.ReadAll(imgResp.Body)
 }
 
 func (a *app) callOpenAIImageEdit(ctx context.Context, prompt string, uploads []imageUpload) ([]byte, error) {
