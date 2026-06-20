@@ -61,6 +61,17 @@ const PRIMARY_NAV: NavItem[] = [
   { page: "help", label: "ヘルプ", icon: HelpCircle }
 ];
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 768);
+  React.useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return isMobile;
+}
+
 function clearStoredSession() {
   try {
     localStorage.removeItem("token");
@@ -92,6 +103,7 @@ function readStoredSession(): { token: string; user: User | null } {
 }
 
 function App() {
+  const isMobile = useIsMobile();
   // --- 認証 ＆ ルーティングステート ---
   const [initialSession] = useState(readStoredSession);
   const [token, setToken] = useState(initialSession.token);
@@ -419,31 +431,30 @@ function App() {
       {user && (
         <header className="topbar">
           <div style={{ cursor: "pointer" }} onClick={() => navigate({ page: "home" })}>
-            
             <h1>next market</h1>
           </div>
           <div className="session-card">
             {user.role === "admin" && (
-              <button 
+              <button
                 type="button"
                 onClick={() => navigate({ page: "admin", subpage: "stats" })}
-                style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5", fontSize: "12px", padding: "6px 12px", cursor: "pointer", borderRadius: "6px" }}
+                style={{ background: "rgba(239,68,68,0.1)", color: "#991b1b", border: "1px solid rgba(239,68,68,0.2)", fontSize: "12px", padding: "6px 12px", cursor: "pointer", borderRadius: "8px", fontWeight: 700 }}
               >
-                🛡️ 管理画面
+                🛡️ {isMobile ? "" : "管理画面"}
               </button>
             )}
-            <IconLabel icon={UserCircle2} label={user?.name ?? "User"} value={user?.email?.split("@")[0] ?? ""} className="session-badge" />
-            <button type="button" className="ghost-button" onClick={logout}>
-              <span className="icon-label">
-                <LogOut size={16} />
-                <span>終了</span>
-              </span>
+            {!isMobile && (
+              <IconLabel icon={UserCircle2} label={user?.name ?? "User"} value={user?.email?.split("@")[0] ?? ""} className="session-badge" />
+            )}
+            <button type="button" className="ghost-button" onClick={logout} style={{ minHeight: "36px", padding: "0 12px" }}>
+              <LogOut size={16} />
+              {!isMobile && <span>終了</span>}
             </button>
           </div>
         </header>
       )}
 
-      {/* ボトムまたはトップのレスポンシブナビゲーションバー */}
+      {/* ナビゲーションバー（デスクトップ:上部横並び / モバイル:下部固定タブ） */}
       {user && route.page !== "auth" && (
         <nav className="nav-bar">
           {PRIMARY_NAV.map((nav) => {
@@ -455,10 +466,19 @@ function App() {
                 className={active ? "nav-link active" : "nav-link"}
                 onClick={() => navigate({ page: nav.page })}
               >
-                <span className="icon-label">
-                  <nav.icon size={16} />
-                  <span>{nav.label}</span>
+                <span className="tab-icon" style={isMobile ? {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: "42px",
+                  height: "28px",
+                  borderRadius: "14px",
+                  transition: "background 150ms ease",
+                  background: active ? "rgba(79, 70, 229, 0.12)" : "transparent"
+                } : undefined}>
+                  <nav.icon size={isMobile ? 22 : 18} />
                 </span>
+                <span style={{ fontSize: isMobile ? "10px" : "14px", fontWeight: 600 }}>{nav.label}</span>
               </button>
             );
           })}
