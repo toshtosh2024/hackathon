@@ -465,7 +465,7 @@ export function ItemDetailScreen({
                 <div className="scene-placeholder">あなた専用の使用イメージを生成できます</div>
               ) : isPlayingVideo ? (
                 <video 
-                  src={videoUrl || "https://assets.mixkit.co/videos/preview/mixkit-spinning-vinyl-record-on-a-turntable-close-up-41551-large.mp4"} 
+                  src={videoUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4"} 
                   autoPlay 
                   loop 
                   muted 
