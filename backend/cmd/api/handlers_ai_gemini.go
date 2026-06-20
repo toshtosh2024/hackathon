@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -89,6 +90,76 @@ func (a *app) callGeminiVision(ctx context.Context, imageBase64, mimeType, promp
 
 	return a.doGeminiRequest(ctx, apiKey, reqBody)
 }
+
+// callOpenAIVision sends an image + text prompt to OpenAI and returns a JSON string.
+// Used as a fallback when Gemini is unavailable or has key configuration issues.
+func (a *app) callOpenAIVision(ctx context.Context, imageBase64, mimeType, prompt string) (string, error) {
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if apiKey == "" {
+		return "", fmt.Errorf("missing OPENAI_API_KEY")
+	}
+
+	reqBody, err := json.Marshal(map[string]any{
+		"model": "gpt-4o-mini",
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type": "text",
+						"text": prompt,
+					},
+					map[string]any{
+						"type": "image_url",
+						"image_url": map[string]string{
+							"url": fmt.Sprintf("data:%s;base64,%s", mimeType, imageBase64),
+						},
+					},
+				},
+			},
+		},
+		"temperature": 0.2,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(reqBody))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("OpenAI Vision API returned error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var res struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return "", err
+	}
+
+	if len(res.Choices) == 0 {
+		return "", errors.New("OpenAI Vision API returned empty response")
+	}
+
+	return res.Choices[0].Message.Content, nil
+}
+
 
 // callGeminiSearch sends a text prompt to Gemini with Google Search grounding enabled.
 // Used for real-time market price research.
@@ -189,10 +260,46 @@ func (a *app) photoAppraise(w http.ResponseWriter, r *http.Request) {
 
 商品の状態（ユーザー申告）: %s`, req.Condition)
 
-	visionJSON, err := a.callGeminiVision(r.Context(), req.ImageBase64, req.MimeType, visionPrompt)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "商品識別に失敗しました: "+err.Error())
-		return
+	var visionJSON string
+	var geminiErr error
+
+	apiKey := a.geminiAPIKey()
+	if apiKey != "" {
+		log.Printf("Attempting Gemini Vision for photo appraisal...")
+		visionJSON, geminiErr = a.callGeminiVision(r.Context(), req.ImageBase64, req.MimeType, visionPrompt)
+	}
+
+	if apiKey == "" || geminiErr != nil {
+		if geminiErr != nil {
+			log.Printf("Gemini Vision failed: %v. Falling back to OpenAI Vision...", geminiErr)
+		} else {
+			log.Printf("Gemini API key is missing. Falling back to OpenAI Vision...")
+		}
+
+		openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+		if openAIKey != "" {
+			var openAIErr error
+			visionJSON, openAIErr = a.callOpenAIVision(r.Context(), req.ImageBase64, req.MimeType, visionPrompt)
+			if openAIErr != nil {
+				var geminiErrMsg string
+				if geminiErr != nil {
+					geminiErrMsg = geminiErr.Error()
+				} else {
+					geminiErrMsg = "missing API key"
+				}
+				writeError(w, http.StatusBadGateway, fmt.Sprintf("AIによる商品識別に失敗しました。(Geminiエラー: %s / OpenAIフォールバックエラー: %v)", geminiErrMsg, openAIErr))
+				return
+			}
+		} else {
+			var geminiErrMsg string
+			if geminiErr != nil {
+				geminiErrMsg = geminiErr.Error()
+			} else {
+				geminiErrMsg = "missing API key"
+			}
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("商品識別（Vision）に必要なAPIキーが設定されていません。Geminiキーが利用できず (%s)、OpenAIキーも設定されていません。ANTIGRAVITY_API_KEY、GEMINI_API_KEY、または OPENAI_API_KEY を設定してください。", geminiErrMsg))
+			return
+		}
 	}
 
 	// Step 1 のJSON をパース
@@ -238,10 +345,29 @@ func (a *app) photoAppraise(w http.ResponseWriter, r *http.Request) {
 		visionResult.SearchKeyword, req.Condition, visionResult.EstimatedCondition,
 	)
 
-	searchText, err := a.callGeminiSearch(r.Context(), searchPrompt)
-	if err != nil {
-		// 検索失敗時はVision結果のみで価格推定
-		searchText = ""
+	var searchText string
+	var err error
+	if apiKey != "" {
+		log.Printf("Attempting Gemini Search grounding for appraisal...")
+		searchText, err = a.callGeminiSearch(r.Context(), searchPrompt)
+	}
+
+	if apiKey == "" || err != nil {
+		if err != nil {
+			log.Printf("Gemini Search failed: %v. Falling back to OpenAI for appraisal text...", err)
+		} else {
+			log.Printf("Gemini API key is missing. Falling back to OpenAI for appraisal text...")
+		}
+
+		openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+		if openAIKey != "" {
+			searchText, err = a.callOpenAI(r.Context(), searchPrompt)
+			if err != nil {
+				searchText = "" // 失敗時はデフォルト相場にフォールバック
+			}
+		} else {
+			searchText = ""
+		}
 	}
 
 	// Step 2 の結果から JSON ブロックを抽出してパース
