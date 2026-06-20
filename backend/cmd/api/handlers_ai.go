@@ -336,7 +336,7 @@ func (a *app) generateSceneVideo(w http.ResponseWriter, r *http.Request) {
 
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status":    "simulated",
-				"videoUrl":  "",
+				"videoUrl":  "https://assets.mixkit.co/videos/preview/mixkit-spinning-vinyl-record-on-a-turntable-close-up-41551-large.mp4",
 				"simulated": true,
 			})
 			return
@@ -378,7 +378,7 @@ func (a *app) generateSceneVideo(w http.ResponseWriter, r *http.Request) {
 			_, _ = a.dbHandle().ExecContext(r.Context(), "UPDATE item_scene_generations SET video_path = 'simulated' WHERE user_id = ? AND item_id = ?", u.ID, itemID)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status":    "simulated",
-				"videoUrl":  "",
+				"videoUrl":  "https://assets.mixkit.co/videos/preview/mixkit-spinning-vinyl-record-on-a-turntable-close-up-41551-large.mp4",
 				"simulated": true,
 			})
 			return
@@ -391,7 +391,7 @@ func (a *app) generateSceneVideo(w http.ResponseWriter, r *http.Request) {
 			_, _ = a.dbHandle().ExecContext(r.Context(), "UPDATE item_scene_generations SET video_path = 'simulated' WHERE user_id = ? AND item_id = ?", u.ID, itemID)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status":    "simulated",
-				"videoUrl":  "",
+				"videoUrl":  "https://assets.mixkit.co/videos/preview/mixkit-spinning-vinyl-record-on-a-turntable-close-up-41551-large.mp4",
 				"simulated": true,
 			})
 			return
@@ -407,7 +407,7 @@ func (a *app) generateSceneVideo(w http.ResponseWriter, r *http.Request) {
 			_, _ = a.dbHandle().ExecContext(r.Context(), "UPDATE item_scene_generations SET video_path = 'simulated' WHERE user_id = ? AND item_id = ?", u.ID, itemID)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status":    "simulated",
-				"videoUrl":  "",
+				"videoUrl":  "https://assets.mixkit.co/videos/preview/mixkit-spinning-vinyl-record-on-a-turntable-close-up-41551-large.mp4",
 				"simulated": true,
 			})
 			return

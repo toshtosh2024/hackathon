@@ -464,27 +464,15 @@ export function ItemDetailScreen({
               {!scene ? (
                 <div className="scene-placeholder">あなた専用の使用イメージを生成できます</div>
               ) : isPlayingVideo ? (
-                videoSimulated ? (
-                  <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", borderRadius: "8px" }}>
-                    <img
-                      src={getPublicUrl(scene.imageUrl)}
-                      alt=""
-                      className="scene-image"
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        animation: "kenBurns 10s infinite alternate ease-in-out"
-                      }}
-                    />
-                    <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none", background: "radial-gradient(circle, transparent 40%, rgba(255,255,255,0.15) 80%)" }}></div>
-                    <div className="sparkle" style={{ position: "absolute", top: "20%", left: "30%", width: "12px", height: "12px", background: "#fff", borderRadius: "50%", boxShadow: "0 0 10px #fff, 0 0 20px #ffccb8", animation: "sparkleGlow 3s infinite alternate ease-in-out" }}></div>
-                    <div className="sparkle" style={{ position: "absolute", top: "60%", left: "70%", width: "8px", height: "8px", background: "#fff", borderRadius: "50%", boxShadow: "0 0 8px #fff, 0 0 16px #b3dcff", animation: "sparkleGlow 2.5s infinite alternate ease-in-out", animationDelay: "0.8s" }}></div>
-                    <div className="sparkle" style={{ position: "absolute", top: "40%", left: "80%", width: "10px", height: "10px", background: "#fff", borderRadius: "50%", boxShadow: "0 0 8px #fff, 0 0 16px #ffefe9", animation: "sparkleGlow 3.5s infinite alternate ease-in-out", animationDelay: "1.5s" }}></div>
-                  </div>
-                ) : (
-                  <video src={videoUrl} autoPlay loop muted playsInline className="scene-image" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} />
-                )
+                <video 
+                  src={videoUrl || "https://assets.mixkit.co/videos/preview/mixkit-spinning-vinyl-record-on-a-turntable-close-up-41551-large.mp4"} 
+                  autoPlay 
+                  loop 
+                  muted 
+                  playsInline 
+                  className="scene-image" 
+                  style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} 
+                />
               ) : (
                 <img className="scene-image" src={getPublicUrl(scene.imageUrl)} alt="" style={{ borderRadius: "8px" }} />
               )}
