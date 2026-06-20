@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // geminiRequest は Gemini generateContent API のリクエストボディ構造体です。
@@ -323,9 +325,9 @@ func (a *app) callGeminiImageGenerate(ctx context.Context, prompt string, upload
 		return nil, "", err
 	}
 
-	// 画像生成は gemini-2.0-flash-exp を使用（image output 対応モデル）
+	// 画像生成は一般提供（GA）された gemini-3.1-flash-image を使用
 	endpoint := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=%s",
+		"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=%s",
 		apiKey,
 	)
 
@@ -375,6 +377,169 @@ func (a *app) callGeminiImageGenerate(ctx context.Context, prompt string, upload
 	}
 
 	return nil, "", fmt.Errorf("Gemini returned no image data in response")
+}
+
+// callGeminiVideoGenerate は Veo 3.1 (veo-3.1-generate-preview) モデルを叩き、
+// 静止画から LRO (Long Running Operation) を使って動画（シネマグラフ）を生成し、完了をポーリングします。
+func (a *app) callGeminiVideoGenerate(ctx context.Context, prompt string, base64Image string) ([]byte, error) {
+	apiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	if apiKey == "" {
+		return nil, fmt.Errorf("missing GEMINI_API_KEY")
+	}
+
+	endpoint := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning?key=%s",
+		apiKey,
+	)
+
+	payload := map[string]any{
+		"instances": []any{
+			map[string]any{
+				"prompt": prompt,
+				"image": map[string]any{
+					"bytesBase64Encoded": base64Image,
+				},
+			},
+		},
+		"parameters": map[string]any{
+			"aspectRatio":   "16:9",
+			"videoDuration": 4,
+			"sampleCount":   1,
+		},
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// LRO 登録自体は一瞬なので 15 秒のタイムアウト
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("Veo 3.1 API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var opRes struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(respBody, &opRes); err != nil {
+		return nil, err
+	}
+	if opRes.Name == "" {
+		return nil, fmt.Errorf("Veo 3.1 API returned no operation name")
+	}
+
+	operationName := opRes.Name
+	pollURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/%s?key=%s", operationName, apiKey)
+
+	log.Printf("Veo 3.1 video generation triggered. Operation name: %s. Starting polling...", operationName)
+
+	// 最大 40 秒待機、5 秒おきにポーリング
+	for i := 0; i < 8; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+
+		pollReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		pollResp, err := client.Do(pollReq)
+		if err != nil {
+			log.Printf("Veo 3.1 polling network error: %v. Retrying...", err)
+			continue
+		}
+
+		pollBody, _ := io.ReadAll(pollResp.Body)
+		pollResp.Body.Close()
+
+		if pollResp.StatusCode >= 300 {
+			log.Printf("Veo 3.1 polling error status %d: %s", pollResp.StatusCode, string(pollBody))
+			continue
+		}
+
+		var opStatus struct {
+			Done     bool `json:"done"`
+			Response *struct {
+				GeneratedVideos []struct {
+					Video struct {
+						Uri                string `json:"uri"`
+						BytesBase64Encoded string `json:"bytesBase64Encoded"`
+					} `json:"video"`
+				} `json:"generatedVideos"`
+				Predictions []struct {
+					BytesBase64Encoded string `json:"bytesBase64Encoded"`
+				} `json:"predictions"`
+			} `json:"response"`
+		}
+
+		if err := json.Unmarshal(pollBody, &opStatus); err != nil {
+			log.Printf("Veo 3.1 polling JSON unmarshal error: %v", err)
+			continue
+		}
+
+		if opStatus.Done {
+			if opStatus.Response == nil {
+				return nil, fmt.Errorf("Veo 3.1 completed but returned no response payload")
+			}
+
+			// bytesBase64Encoded が直接 predictions に含まれている場合
+			if len(opStatus.Response.Predictions) > 0 && opStatus.Response.Predictions[0].BytesBase64Encoded != "" {
+				return base64.StdEncoding.DecodeString(opStatus.Response.Predictions[0].BytesBase64Encoded)
+			}
+
+			// generatedVideos の中にある場合
+			if len(opStatus.Response.GeneratedVideos) > 0 {
+				video := opStatus.Response.GeneratedVideos[0].Video
+				if video.BytesBase64Encoded != "" {
+					return base64.StdEncoding.DecodeString(video.BytesBase64Encoded)
+				}
+				if video.Uri != "" {
+					downloadURL := video.Uri
+					if !strings.Contains(downloadURL, "?") {
+						downloadURL = fmt.Sprintf("%s?key=%s", downloadURL, apiKey)
+					} else {
+						downloadURL = fmt.Sprintf("%s&key=%s", downloadURL, apiKey)
+					}
+					dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+					if err != nil {
+						return nil, err
+					}
+					dlResp, err := client.Do(dlReq)
+					if err != nil {
+						return nil, err
+					}
+					defer dlResp.Body.Close()
+
+					if dlResp.StatusCode >= 300 {
+						dlBody, _ := io.ReadAll(dlResp.Body)
+						return nil, fmt.Errorf("failed to download video from URI %d: %s", dlResp.StatusCode, string(dlBody))
+					}
+					return io.ReadAll(dlResp.Body)
+				}
+			}
+
+			return nil, fmt.Errorf("Veo 3.1 completed but found no base64 encoded video or uri")
+		}
+	}
+
+	return nil, fmt.Errorf("Veo 3.1 video generation timed out (40s limit)")
 }
 
 // defaultPrice はカテゴリーと状態に基づくフォールバック価格を返します。

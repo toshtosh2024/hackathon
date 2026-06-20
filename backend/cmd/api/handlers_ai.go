@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -277,102 +278,117 @@ func (a *app) generateSceneVideo(w http.ResponseWriter, r *http.Request) {
 	// Base64 encode the image
 	base64Image := base64.StdEncoding.EncodeToString(imageBytes)
 
-	// 3. Obtain GCP token and Project ID
+	// 3. Obtain Gemini API Key for Veo 3.1 or GCP token and Project ID
+	apiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
 	gcpProjectID := env("FIRESTORE_PROJECT", env("GCP_PROJECT", env("GOOGLE_CLOUD_PROJECT", "")))
 	token, tokenErr := a.getGCPToken()
 
-	// If no GCP token or project ID is set, or Vertex AI is not configured, fallback gracefully!
-	if tokenErr != nil || gcpProjectID == "" {
-		log.Printf("Vertex AI Matcher: GCP token or project ID not set. Falling back to high-fidelity cinemagraph simulation. (TokenErr: %v, Project: %q)", tokenErr, gcpProjectID)
-		_, _ = a.dbHandle().ExecContext(r.Context(), `
-			UPDATE item_scene_generations 
-			SET video_path = 'simulated' 
-			WHERE user_id = ? AND item_id = ?`, u.ID, itemID)
+	var videoBytes []byte
+	var generateErr error
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":    "simulated",
-			"videoUrl":  "",
-			"simulated": true,
-		})
-		return
+	if apiKey != "" {
+		log.Printf("Calling Gemini API Veo 3.1 (veo-3.1-generate-preview) for Image-to-Video...")
+		videoBytes, generateErr = a.callGeminiVideoGenerate(r.Context(), "cinematic smooth panning, slow motion loop, high quality, 4k", base64Image)
 	}
 
-	// 4. Call Vertex AI Imagen Video Generation REST API
-	log.Printf("Calling Vertex AI Image-to-Video API for project: %s...", gcpProjectID)
-	endpoint := fmt.Sprintf("https://us-central1-aiplatform.googleapis.com/v1/projects/%s/locations/us-central1/publishers/google/models/imagegeneration:predict", gcpProjectID)
+	if generateErr != nil || apiKey == "" {
+		if apiKey != "" {
+			log.Printf("Gemini Veo 3.1 video generation failed: %v — falling back to Vertex AI / simulation", generateErr)
+		}
 
-	payload := map[string]any{
-		"instances": []any{
-			map[string]any{
-				"prompt": "cinematic smooth panning, slow motion loop, high quality, 4k",
-				"image": map[string]any{
-					"bytesBase64Encoded": base64Image,
+		// If no GCP token or project ID is set, or Vertex AI is not configured, fallback gracefully!
+		if tokenErr != nil || gcpProjectID == "" {
+			log.Printf("Vertex AI Matcher: GCP token or project ID not set. Falling back to high-fidelity cinemagraph simulation. (TokenErr: %v, Project: %q)", tokenErr, gcpProjectID)
+			_, _ = a.dbHandle().ExecContext(r.Context(), `
+				UPDATE item_scene_generations 
+				SET video_path = 'simulated' 
+				WHERE user_id = ? AND item_id = ?`, u.ID, itemID)
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":    "simulated",
+				"videoUrl":  "",
+				"simulated": true,
+			})
+			return
+		}
+
+		// 4. Call Vertex AI Imagen Video Generation REST API
+		log.Printf("Calling Vertex AI Image-to-Video API for project: %s...", gcpProjectID)
+		endpoint := fmt.Sprintf("https://us-central1-aiplatform.googleapis.com/v1/projects/%s/locations/us-central1/publishers/google/models/imagegeneration:predict", gcpProjectID)
+
+		payload := map[string]any{
+			"instances": []any{
+				map[string]any{
+					"prompt": "cinematic smooth panning, slow motion loop, high quality, 4k",
+					"image": map[string]any{
+						"bytesBase64Encoded": base64Image,
+					},
 				},
 			},
-		},
-		"parameters": map[string]any{
-			"sampleCount":   1,
-			"aspectRatio":   "16:9",
-			"videoDuration": 4,
-		},
-	}
+			"parameters": map[string]any{
+				"sampleCount":   1,
+				"aspectRatio":   "16:9",
+				"videoDuration": 4,
+			},
+		}
 
-	payloadBytes, _ := json.Marshal(payload)
-	vReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, endpoint, bytes.NewReader(payloadBytes))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create Vertex request")
-		return
-	}
-	vReq.Header.Set("Authorization", "Bearer "+token)
-	vReq.Header.Set("Content-Type", "application/json")
+		payloadBytes, _ := json.Marshal(payload)
+		vReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, endpoint, bytes.NewReader(payloadBytes))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create Vertex request")
+			return
+		}
+		vReq.Header.Set("Authorization", "Bearer "+token)
+		vReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 45 * time.Second}
-	vResp, err := client.Do(vReq)
-	if err != nil {
-		log.Printf("Vertex AI Video call failed: %v. Falling back to simulation.", err)
-		_, _ = a.dbHandle().ExecContext(r.Context(), "UPDATE item_scene_generations SET video_path = 'simulated' WHERE user_id = ? AND item_id = ?", u.ID, itemID)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":    "simulated",
-			"videoUrl":  "",
-			"simulated": true,
-		})
-		return
-	}
-	defer vResp.Body.Close()
+		client := &http.Client{Timeout: 45 * time.Second}
+		vResp, err := client.Do(vReq)
+		if err != nil {
+			log.Printf("Vertex AI Video call failed: %v. Falling back to simulation.", err)
+			_, _ = a.dbHandle().ExecContext(r.Context(), "UPDATE item_scene_generations SET video_path = 'simulated' WHERE user_id = ? AND item_id = ?", u.ID, itemID)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":    "simulated",
+				"videoUrl":  "",
+				"simulated": true,
+			})
+			return
+		}
+		defer vResp.Body.Close()
 
-	vRespBody, _ := io.ReadAll(vResp.Body)
-	if vResp.StatusCode >= 300 {
-		log.Printf("Vertex AI Video API returned error %d: %s. Falling back to simulation.", vResp.StatusCode, string(vRespBody))
-		_, _ = a.dbHandle().ExecContext(r.Context(), "UPDATE item_scene_generations SET video_path = 'simulated' WHERE user_id = ? AND item_id = ?", u.ID, itemID)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":    "simulated",
-			"videoUrl":  "",
-			"simulated": true,
-		})
-		return
-	}
+		vRespBody, _ := io.ReadAll(vResp.Body)
+		if vResp.StatusCode >= 300 {
+			log.Printf("Vertex AI Video API returned error %d: %s. Falling back to simulation.", vResp.StatusCode, string(vRespBody))
+			_, _ = a.dbHandle().ExecContext(r.Context(), "UPDATE item_scene_generations SET video_path = 'simulated' WHERE user_id = ? AND item_id = ?", u.ID, itemID)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":    "simulated",
+				"videoUrl":  "",
+				"simulated": true,
+			})
+			return
+		}
 
-	var vertexRes struct {
-		Predictions []struct {
-			BytesBase64Encoded string `json:"bytesBase64Encoded"`
-		} `json:"predictions"`
-	}
-	if err := json.Unmarshal(vRespBody, &vertexRes); err != nil || len(vertexRes.Predictions) == 0 {
-		log.Printf("Vertex AI Video JSON unmarshal failed. Falling back to simulation.")
-		_, _ = a.dbHandle().ExecContext(r.Context(), "UPDATE item_scene_generations SET video_path = 'simulated' WHERE user_id = ? AND item_id = ?", u.ID, itemID)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":    "simulated",
-			"videoUrl":  "",
-			"simulated": true,
-		})
-		return
-	}
+		var vertexRes struct {
+			Predictions []struct {
+				BytesBase64Encoded string `json:"bytesBase64Encoded"`
+			} `json:"predictions"`
+		}
+		if err := json.Unmarshal(vRespBody, &vertexRes); err != nil || len(vertexRes.Predictions) == 0 {
+			log.Printf("Vertex AI Video JSON unmarshal failed. Falling back to simulation.")
+			_, _ = a.dbHandle().ExecContext(r.Context(), "UPDATE item_scene_generations SET video_path = 'simulated' WHERE user_id = ? AND item_id = ?", u.ID, itemID)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":    "simulated",
+				"videoUrl":  "",
+				"simulated": true,
+			})
+			return
+		}
 
-	// 5. Decode generated MP4 video bytes
-	videoBytes, err := base64.StdEncoding.DecodeString(vertexRes.Predictions[0].BytesBase64Encoded)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to decode generated video")
-		return
+		decodedBytes, err := base64.StdEncoding.DecodeString(vertexRes.Predictions[0].BytesBase64Encoded)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to decode generated video")
+			return
+		}
+		videoBytes = decodedBytes
 	}
 
 	// 6. Save video to GCS
