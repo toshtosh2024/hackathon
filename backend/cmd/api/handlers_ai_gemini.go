@@ -55,19 +55,27 @@ type geminiResponse struct {
 	} `json:"candidates"`
 }
 
-func geminiModel() string {
+func (a *app) geminiModel() string {
 	if m := os.Getenv("GEMINI_MODEL"); m != "" {
 		return m
 	}
 	return "gemini-2.0-flash"
 }
 
+// geminiAPIKey は GEMINI_API_KEY または ANTIGRAVITY_API_KEY 環境変数を取得します。
+func (a *app) geminiAPIKey() string {
+	if k := strings.TrimSpace(os.Getenv("GEMINI_API_KEY")); k != "" {
+		return k
+	}
+	return strings.TrimSpace(os.Getenv("ANTIGRAVITY_API_KEY"))
+}
+
 // callGeminiVision sends an image + text prompt to Gemini and returns a JSON string.
 // Used for product identification from photos.
 func (a *app) callGeminiVision(ctx context.Context, imageBase64, mimeType, prompt string) (string, error) {
-	apiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	apiKey := a.geminiAPIKey()
 	if apiKey == "" {
-		return "", fmt.Errorf("missing GEMINI_API_KEY")
+		return "", fmt.Errorf("missing GEMINI_API_KEY / ANTIGRAVITY_API_KEY")
 	}
 
 	reqBody := geminiRequest{
@@ -85,9 +93,9 @@ func (a *app) callGeminiVision(ctx context.Context, imageBase64, mimeType, promp
 // callGeminiSearch sends a text prompt to Gemini with Google Search grounding enabled.
 // Used for real-time market price research.
 func (a *app) callGeminiSearch(ctx context.Context, prompt string) (string, error) {
-	apiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	apiKey := a.geminiAPIKey()
 	if apiKey == "" {
-		return "", fmt.Errorf("missing GEMINI_API_KEY")
+		return "", fmt.Errorf("missing GEMINI_API_KEY / ANTIGRAVITY_API_KEY")
 	}
 
 	reqBody := geminiRequest{
@@ -101,7 +109,7 @@ func (a *app) callGeminiSearch(ctx context.Context, prompt string) (string, erro
 }
 
 func (a *app) doGeminiRequest(ctx context.Context, apiKey string, reqBody geminiRequest) (string, error) {
-	model := geminiModel()
+	model := a.geminiModel()
 	endpoint := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		url.PathEscape(model), apiKey,
@@ -294,9 +302,9 @@ func extractTaggedJSON(s string) string {
 // callGeminiImageGenerate は複数の入力画像とプロンプトから Gemini で合成画像を生成します。
 // OpenAI の /v1/images/edits の代替として使用します。
 func (a *app) callGeminiImageGenerate(ctx context.Context, prompt string, uploads []imageUpload) ([]byte, string, error) {
-	apiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	apiKey := a.geminiAPIKey()
 	if apiKey == "" {
-		return nil, "", fmt.Errorf("missing GEMINI_API_KEY")
+		return nil, "", fmt.Errorf("missing GEMINI_API_KEY / ANTIGRAVITY_API_KEY")
 	}
 
 	// 入力画像を parts として組み立てる
@@ -382,9 +390,9 @@ func (a *app) callGeminiImageGenerate(ctx context.Context, prompt string, upload
 // callGeminiVideoGenerate は Veo 3.1 (veo-3.1-generate-preview) モデルを叩き、
 // 静止画から LRO (Long Running Operation) を使って動画（シネマグラフ）を生成し、完了をポーリングします。
 func (a *app) callGeminiVideoGenerate(ctx context.Context, prompt string, base64Image string) ([]byte, error) {
-	apiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	apiKey := a.geminiAPIKey()
 	if apiKey == "" {
-		return nil, fmt.Errorf("missing GEMINI_API_KEY")
+		return nil, fmt.Errorf("missing GEMINI_API_KEY / ANTIGRAVITY_API_KEY")
 	}
 
 	endpoint := fmt.Sprintf(

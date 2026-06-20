@@ -200,24 +200,54 @@ func (a *app) generateItemScene(w http.ResponseWriter, r *http.Request) {
 
 	prompt := itemScenePrompt(storedUser.Name, it)
 
-	// Gemini 2.0 Flash Exp で合成画像生成を試みる
-	generatedBytes, generatedMIME, geminiErr := a.callGeminiImageGenerate(r.Context(), prompt, []imageUpload{
-		{Filename: "avatar.jpg", ContentType: avatarType, Bytes: avatarBytes},
-		{Filename: "item.jpg", ContentType: itemType, Bytes: itemBytes},
-	})
-	if geminiErr != nil {
-		// Gemini 失敗時は DALL-E 3 テキスト→画像生成にフォールバック
-		log.Printf("Gemini image generation failed (item=%d): %v — falling back to DALL-E 3", itemID, geminiErr)
+	geminiKey := a.geminiAPIKey()
+	openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+
+	var generatedBytes []byte
+	var generatedMIME string
+	var imageGenErr error
+
+	if geminiKey != "" {
+		log.Printf("Gemini image generation priority selected (item=%d)...", itemID)
+		generatedBytes, generatedMIME, imageGenErr = a.callGeminiImageGenerate(r.Context(), prompt, []imageUpload{
+			{Filename: "avatar.jpg", ContentType: avatarType, Bytes: avatarBytes},
+			{Filename: "item.jpg", ContentType: itemType, Bytes: itemBytes},
+		})
+		if imageGenErr != nil {
+			log.Printf("Gemini image generation failed (item=%d): %v", itemID, imageGenErr)
+			// OpenAI キーがあればフォールバック
+			if openAIKey != "" {
+				log.Printf("Falling back to OpenAI (gpt-image-2)...")
+				dallEBytes, dallEErr := a.callOpenAIImageGenerate(r.Context(), prompt, []imageUpload{
+					{Filename: "avatar.jpg", ContentType: avatarType, Bytes: avatarBytes},
+					{Filename: "item.jpg", ContentType: itemType, Bytes: itemBytes},
+				})
+				if dallEErr != nil {
+					writeError(w, http.StatusBadGateway, fmt.Sprintf("AI画像生成に失敗しました。(Geminiエラー: %v / DALL-Eフォールバックエラー: %v)", imageGenErr, dallEErr))
+					return
+				}
+				generatedBytes = dallEBytes
+				generatedMIME = "image/png"
+			} else {
+				writeError(w, http.StatusBadGateway, fmt.Sprintf("GeminiによるAI画像生成に失敗しました。OpenAIキーがないためフォールバックできません。(エラー: %v)", imageGenErr))
+				return
+			}
+		}
+	} else if openAIKey != "" {
+		log.Printf("OpenAI image generation selected (item=%d)...", itemID)
 		dallEBytes, dallEErr := a.callOpenAIImageGenerate(r.Context(), prompt, []imageUpload{
 			{Filename: "avatar.jpg", ContentType: avatarType, Bytes: avatarBytes},
 			{Filename: "item.jpg", ContentType: itemType, Bytes: itemBytes},
 		})
 		if dallEErr != nil {
-			writeError(w, http.StatusBadGateway, fmt.Sprintf("AI画像生成に失敗しました。しばらくしてから再試行してください。(Gemini: %v / DALL-E: %v)", geminiErr, dallEErr))
+			writeError(w, http.StatusBadGateway, fmt.Sprintf("OpenAIによるAI画像生成に失敗しました。(エラー: %v)", dallEErr))
 			return
 		}
 		generatedBytes = dallEBytes
 		generatedMIME = "image/png"
+	} else {
+		writeError(w, http.StatusBadRequest, "AI画像生成に必要なAPIキーが設定されていません。ANTIGRAVITY_API_KEY、GEMINI_API_KEY、または OPENAI_API_KEY を環境変数に設定してください。")
+		return
 	}
 
 	if generatedMIME == "" {
@@ -279,7 +309,7 @@ func (a *app) generateSceneVideo(w http.ResponseWriter, r *http.Request) {
 	base64Image := base64.StdEncoding.EncodeToString(imageBytes)
 
 	// 3. Obtain Gemini API Key for Veo 3.1 or GCP token and Project ID
-	apiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	apiKey := a.geminiAPIKey()
 	gcpProjectID := env("FIRESTORE_PROJECT", env("GCP_PROJECT", env("GOOGLE_CLOUD_PROJECT", "")))
 	token, tokenErr := a.getGCPToken()
 
