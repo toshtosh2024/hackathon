@@ -5,7 +5,7 @@
  */
 
 import React, { useRef, useState } from "react";
-import { Camera, Sparkles, CheckCircle, AlertCircle } from "lucide-react";
+import { Camera, Images, Sparkles, CheckCircle, AlertCircle } from "lucide-react";
 import { CATEGORIES } from "./types";
 
 export interface AppraiseResult {
@@ -40,7 +40,8 @@ const CONDITIONS = [
 ];
 
 export function PhotoAppraiser({ api, onApply }: PhotoAppraiserProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [condition, setCondition] = useState("良い");
@@ -104,22 +105,42 @@ export function PhotoAppraiser({ api, onApply }: PhotoAppraiserProps) {
       </div>
 
       {/* 撮影・ファイル選択 */}
-      <div style={styles.uploadArea} onClick={() => fileInputRef.current?.click()}>
+      <div style={styles.uploadArea}>
         {preview ? (
           <img src={preview} alt="商品プレビュー" style={styles.previewImage} />
         ) : (
           <div style={styles.uploadPlaceholder}>
             <Camera size={32} color="#94a3b8" />
-            <span style={styles.uploadText}>写真を撮影 / 選択</span>
-            <span style={styles.uploadSubtext}>モバイルでは端末カメラが起動します</span>
+            <span style={styles.uploadText}>鑑定する商品の写真</span>
+            <span style={styles.uploadSubtext}>撮影するか、端末内の画像を選択してください</span>
           </div>
         )}
+      </div>
+
+      <div style={styles.photoActions}>
+        <button type="button" style={styles.cameraButton} onClick={() => cameraInputRef.current?.click()}>
+          <Camera size={16} />
+          写真を撮る
+        </button>
+        <button type="button" style={styles.libraryButton} onClick={() => uploadInputRef.current?.click()}>
+          <Images size={16} />
+          画像を選択
+        </button>
         <input
-          ref={fileInputRef}
+          ref={cameraInputRef}
           type="file"
           accept="image/*"
           capture="environment"
           onChange={handleFileChange}
+          onClick={(e) => { e.currentTarget.value = ""; }}
+          style={{ display: "none" }}
+        />
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={handleFileChange}
+          onClick={(e) => { e.currentTarget.value = ""; }}
           style={{ display: "none" }}
         />
       </div>
@@ -257,7 +278,6 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #edeef5",
     borderRadius: "12px",
     background: "#fff",
-    cursor: "pointer",
     overflow: "hidden",
     minHeight: "130px",
     display: "flex",
@@ -284,6 +304,28 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     maxHeight: "240px",
     objectFit: "contain",
+  },
+  photoActions: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "10px",
+  },
+  cameraButton: {
+    background: "linear-gradient(135deg, #4F46E5, #6366f1)",
+    color: "#fff",
+    minHeight: "44px",
+    padding: "10px 14px",
+    fontSize: "13px",
+    fontWeight: 700,
+  },
+  libraryButton: {
+    background: "#fff",
+    border: "1.5px solid rgba(79, 70, 229, 0.2)",
+    color: "#4F46E5",
+    minHeight: "44px",
+    padding: "10px 14px",
+    fontSize: "13px",
+    fontWeight: 700,
   },
   conditionRow: {
     display: "flex",

@@ -8,6 +8,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import {
+  CheckCircle2,
   HelpCircle,
   Home,
   LogOut,
@@ -325,6 +326,7 @@ function App() {
   // 🔔 SaaS-Free Browser Tab Notification Blinking (新着通知時のタブ点滅効果)
   useEffect(() => {
     if (!notice) return;
+    const dismissTimer = window.setTimeout(() => setNotice(""), 4500);
     let isBlink = false;
     const originalTitle = document.title;
     const interval = setInterval(() => {
@@ -341,6 +343,7 @@ function App() {
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
+      window.clearTimeout(dismissTimer);
       clearInterval(interval);
       document.title = originalTitle;
       document.removeEventListener("visibilitychange", handleVisibility);
@@ -421,9 +424,11 @@ function App() {
       )}
 
       {notice && (
-        <div className="system-notice" style={{ animation: "sparkleGlow 1s alternate" }}>
-          <span>{notice}</span>
-          <button type="button" onClick={() => setNotice("")}>✕</button>
+        <div className="system-notice" role="status" aria-live="polite">
+          <CheckCircle2 className="system-notice-icon" size={22} aria-hidden="true" />
+          <span className="system-notice-text">{notice}</span>
+          <button type="button" onClick={() => setNotice("")} aria-label="通知を閉じる">✕</button>
+          <span className="system-notice-timer" aria-hidden="true" />
         </div>
       )}
 
