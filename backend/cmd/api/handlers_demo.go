@@ -40,7 +40,7 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 	// -------------------------------------------------------------------------
 	// [Step 1]: Ensure Mock Demo Accounts exist in the system
 	// -------------------------------------------------------------------------
-	
+
 	// Create "Aさん" (User 9991) - Default Demo Account for public visitors
 	_, _ = databaseTransaction.ExecContext(r.Context(), `
 		INSERT IGNORE INTO users (id, name, email, password_hash, role) 
@@ -67,7 +67,7 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 	// -------------------------------------------------------------------------
 	// [Step 2]: Safe Relational Database Cleanups
 	// -------------------------------------------------------------------------
-	
+
 	demoItemIDs := "(9901, 9902, 9903, 9904)"
 
 	// Temporarily disable foreign key checks during deletion to prevent relational constraint blockages
@@ -90,6 +90,19 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 
 	// Delete image asset records
 	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM item_images WHERE item_id IN "+demoItemIDs)
+	// Delete the 50-item marketplace catalog. The fixed ID range keeps this seeder idempotent.
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM item_scene_generations WHERE item_id BETWEEN 10001 AND 10050")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM ai_generations WHERE item_id BETWEEN 10001 AND 10050")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM user_reviews WHERE item_id BETWEEN 10001 AND 10050")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM barter_loop_members WHERE item_id BETWEEN 10001 AND 10050")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM negotiations WHERE item_id BETWEEN 10001 AND 10050")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM likes WHERE item_id BETWEEN 10001 AND 10050")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM purchases WHERE item_id BETWEEN 10001 AND 10050")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM item_moderations WHERE item_id BETWEEN 10001 AND 10050")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE item_id BETWEEN 10001 AND 10050)")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM conversations WHERE item_id BETWEEN 10001 AND 10050")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM item_images WHERE item_id BETWEEN 10001 AND 10050")
+	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM items WHERE id BETWEEN 10001 AND 10050")
 
 	// Finally delete the parent items themselves safely
 	_, _ = databaseTransaction.ExecContext(r.Context(), "DELETE FROM items WHERE id IN "+demoItemIDs+" OR seller_id = ? OR seller_id = 9992 OR seller_id = 9993", currentUserRecord.ID)
@@ -100,7 +113,7 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 	// -------------------------------------------------------------------------
 	// [Step 3]: Seed Demo Parent Items
 	// -------------------------------------------------------------------------
-	
+
 	// Item A: iPhone 14 Pro (AI Price Negotiation Candidate)
 	resA, err := databaseTransaction.ExecContext(r.Context(), `
 		INSERT INTO items (id, seller_id, title, description, category, price, min_price, ai_personality, status) 
@@ -145,10 +158,17 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 	itemDID, _ := resD.LastInsertId()
 	_, _ = databaseTransaction.ExecContext(r.Context(), "INSERT INTO item_images (item_id, image_url, sort_order) VALUES (?, 'https://images.unsplash.com/photo-1591047139829-d91aecb6caea?auto=format&fit=crop&w=600&q=80', 0)", itemDID)
 
+	// Add a substantial existing-item catalog so search, filters and home discovery
+	// feel populated immediately after demo setup.
+	if err := seedDemoCatalog(r.Context(), databaseTransaction); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to seed marketplace catalog: "+err.Error())
+		return
+	}
+
 	// -------------------------------------------------------------------------
 	// [Step 4]: Establish the 3-Party Barter Loop #999 (Current User -> User 2 -> User 3 -> Current User)
 	// -------------------------------------------------------------------------
-	
+
 	justification := "AさんのSwitch（ゲーム ¥28,000）、Bさん（ガジェット太郎）のiPad（家電 ¥65,000）、Cさん（お洒落はなこ）のコート（ファッション ¥42,000）による循環等価物々交換ループです。商品の参考市場価格の差額を完全に相殺し、全員の純利益が「ちょうど0円（ゼロサム）」に収束するように、Aさんは価値の高いコートを受け取るため差額の -¥14,000 を支払い、Bさんは価値の低いSwitchを受け取るため差額の +¥37,000 を受け取り、Cさんは価値の高いiPadを受け取るため差額の -¥23,000 を支払います。決済および物流の整合性が完全に維持されます。"
 	_, err = databaseTransaction.ExecContext(r.Context(), `
 		INSERT INTO barter_loops (id, status, justification) 
@@ -159,7 +179,7 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert Loop Members with calculated Zero-Sum price adjustments
-	
+
 	// Member 1 (Current User, sells Switch to Gadget Taro, wants iPad)
 	_, _ = databaseTransaction.ExecContext(r.Context(), `
 		INSERT INTO barter_loop_members (loop_id, user_id, item_id, receiver_id, cash_adjustment, shipping_status) 
@@ -197,7 +217,7 @@ func (a *app) seedDemo(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":          "success",
-		"message":         "デモデータの自動セットアップ（清算差額調整、3者間Pendingループ、iPhone Active）が完了しました！",
+		"message":         "デモデータと既存商品50件のセットアップが完了しました！",
 		"negotiateItemId": 9901,
 		"token":           a.signToken(currentUserRecord),
 		"user":            currentUserRecord,
