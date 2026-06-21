@@ -152,7 +152,7 @@ func (a *app) generateItemScene(w http.ResponseWriter, r *http.Request) {
 
 	// 既に生成済みの画像があるか確認（最新の生成成功物を再利用して無駄なAPI再生成を回避）
 	var existingImagePath, existingPrompt, existingVideoPath string
-	cacheErr := db.QueryRowContext(r.Context(), 
+	cacheErr := db.QueryRowContext(r.Context(),
 		"SELECT image_path, prompt, COALESCE(video_path, '') FROM item_scene_generations WHERE user_id = ? AND item_id = ? AND image_path IS NOT NULL AND image_path != '' ORDER BY created_at DESC LIMIT 1",
 		u.ID, itemID,
 	).Scan(&existingImagePath, &existingPrompt, &existingVideoPath)
@@ -160,7 +160,7 @@ func (a *app) generateItemScene(w http.ResponseWriter, r *http.Request) {
 	if cacheErr == nil {
 		log.Printf("Found cached generated scene for item=%d and user=%d. Returning directly.", itemID, u.ID)
 		publicURL := gcsPathToPublicURL(existingImagePath)
-		
+
 		var videoURL string
 		if existingVideoPath == "simulated" {
 			videoURL = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4"
@@ -372,6 +372,17 @@ func (a *app) generateSceneVideo(w http.ResponseWriter, r *http.Request) {
 
 	// Base64 encode the image
 	base64Image := base64.StdEncoding.EncodeToString(imageBytes)
+	item, itemErr := a.findItem(r.Context(), itemID)
+	if itemErr != nil {
+		writeError(w, http.StatusNotFound, "item not found")
+		return
+	}
+	videoPrompt := fmt.Sprintf(
+		"Create a polished product showcase video for the marketplace listing '%s' (category: %s). Listing description: %s. Use the supplied AI-generated product scene as the first frame and preserve the product's appearance, shape, colors, logos, and condition. Add only subtle natural motion, a slow cinematic camera move, and realistic lighting. Keep the product clearly visible and do not add text, captions, new products, people, or misleading features.",
+		item.Title,
+		item.Category,
+		item.Description,
+	)
 
 	// 3. Obtain Gemini API Key for Veo 3.1 or GCP token and Project ID
 	apiKey := a.geminiAPIKey(r.Context())
@@ -383,7 +394,7 @@ func (a *app) generateSceneVideo(w http.ResponseWriter, r *http.Request) {
 
 	if apiKey != "" {
 		log.Printf("Calling Gemini API Veo 3.1 (veo-3.1-generate-preview) for Image-to-Video...")
-		videoBytes, generateErr = a.callGeminiVideoGenerate(r.Context(), "cinematic smooth panning, slow motion loop, high quality, 4k", base64Image)
+		videoBytes, generateErr = a.callGeminiVideoGenerate(r.Context(), videoPrompt, base64Image)
 	}
 
 	if generateErr != nil || apiKey == "" {
@@ -414,7 +425,7 @@ func (a *app) generateSceneVideo(w http.ResponseWriter, r *http.Request) {
 		payload := map[string]any{
 			"instances": []any{
 				map[string]any{
-					"prompt": "cinematic smooth panning, slow motion loop, high quality, 4k",
+					"prompt": videoPrompt,
 					"image": map[string]any{
 						"bytesBase64Encoded": base64Image,
 					},

@@ -32,7 +32,7 @@ export function SellScreen({
   const [suggesting, setSuggesting] = useState(false);
   const [suggestedMsg, setSuggestedMsg] = useState("");
 
-  function handleAppraiseApply(result: AppraiseResult) {
+  function handleAppraiseApply(result: AppraiseResult, appraisedImage: File) {
     setTitle(result.title);
     if (CATEGORIES.includes(result.category)) {
       setCategory(result.category);
@@ -47,6 +47,7 @@ export function SellScreen({
       setDescription(descLines.join("\n\n"));
     }
     setAppraiserApplied(true);
+    setImageFiles([appraisedImage]);
     setSuggestedMsg(`📷 AI写真査定完了: 推奨価格 ¥${result.price.toLocaleString()} (${result.reason})`);
   }
 
@@ -126,11 +127,11 @@ export function SellScreen({
       <form onSubmit={submit} className="panel form-panel" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
         {/* AI写真査定 */}
         <div className="input-group">
-          <label>写真で商品を自動識別（AI査定）</label>
+          <label>写真から商品候補を検索（AI検索）</label>
           <PhotoAppraiser api={api} onApply={handleAppraiseApply} />
           {appraiserApplied && (
             <p className="notice" style={{ margin: "6px 0 0 0", fontSize: "12px", color: "#059669" }}>
-              ✓ AI査定結果をフォームに反映しました。内容を確認・修正してから出品してください。
+              ✓ AI候補と入力写真をフォームに反映しました。内容を確認・修正してから出品してください。
             </p>
           )}
         </div>
@@ -245,6 +246,11 @@ export function SellScreen({
 
         <div className="input-group">
           <label>商品画像アップロード</label>
+          {appraiserApplied && imageFiles.length === 1 && (
+            <p className="notice" style={{ margin: "0 0 8px", fontSize: "12px", color: "#059669" }}>
+              AI検索で入力した写真を出品画像として使用します。
+            </p>
+          )}
           <label className="upload-drop">
             <UploadCloud size={32} />
             <span>{imageFiles.length > 0 ? `${imageFiles.length}枚の画像を選択済み` : "商品画像を選択 (JPG / PNG)"}</span>
@@ -252,7 +258,10 @@ export function SellScreen({
               type="file"
               multiple
               accept="image/*"
-              onChange={(e) => setImageFiles(Array.from(e.target.files ?? []))}
+              onChange={(e) => {
+                setImageFiles(Array.from(e.target.files ?? []));
+                setAppraiserApplied(false);
+              }}
             />
           </label>
         </div>

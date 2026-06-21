@@ -1,7 +1,7 @@
 /**
  * @file PhotoAppraiser.tsx
  * @description カメラで撮影した商品画像をGemini Vision + Google Search grounding で分析し、
- * 商品名・カテゴリ・相場価格を自動提案するコンポーネント。
+ * 写真付きの商品候補と相場価格を3件提案するコンポーネント。
  */
 
 import React, { useRef, useState } from "react";
@@ -18,11 +18,17 @@ export interface AppraiseResult {
   maxPrice: number;
   reason: string;
   searchSummary: string;
+  likelihoodReason?: string;
+}
+
+interface PhotoAppraiseResponse {
+  condition: string;
+  candidates: AppraiseResult[];
 }
 
 interface PhotoAppraiserProps {
   api: <T>(path: string, options?: RequestInit) => Promise<T>;
-  onApply: (result: AppraiseResult) => void;
+  onApply: (result: AppraiseResult, imageFile: File) => void;
 }
 
 const CONDITIONS = [
@@ -39,7 +45,7 @@ export function PhotoAppraiser({ api, onApply }: PhotoAppraiserProps) {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [condition, setCondition] = useState("良い");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<AppraiseResult | null>(null);
+  const [candidates, setCandidates] = useState<AppraiseResult[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -59,7 +65,7 @@ export function PhotoAppraiser({ api, onApply }: PhotoAppraiserProps) {
     }
 
     setImageFile(file);
-    setResult(null);
+    setCandidates([]);
     setError(null);
     const reader = new FileReader();
     reader.onload = (ev) => setPreview(ev.target?.result as string);
@@ -70,18 +76,18 @@ export function PhotoAppraiser({ api, onApply }: PhotoAppraiserProps) {
     if (!imageFile || !preview) return;
     setLoading(true);
     setError(null);
-    setResult(null);
+    setCandidates([]);
 
     try {
       // DataURL → base64（プレフィックスを除去）
       const base64 = preview.split(",")[1];
       const mimeType = imageFile.type || "image/jpeg";
 
-      const res = await api<AppraiseResult>("/ai/photo-appraise", {
+      const res = await api<PhotoAppraiseResponse>("/ai/photo-appraise", {
         method: "POST",
         body: JSON.stringify({ imageBase64: base64, mimeType, condition }),
       });
-      setResult(res);
+      setCandidates(res.candidates ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "AI査定に失敗しました");
     } finally {
@@ -89,13 +95,11 @@ export function PhotoAppraiser({ api, onApply }: PhotoAppraiserProps) {
     }
   }
 
-  const isValidCategory = result && CATEGORIES.includes(result.category);
-
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <Camera size={18} color="#4F46E5" />
-        <span style={styles.headerTitle}>カメラAI査定</span>
+        <span style={styles.headerTitle}>写真からAI商品検索</span>
         <span style={styles.badge}>Gemini + Google Search</span>
       </div>
 
@@ -143,7 +147,7 @@ export function PhotoAppraiser({ api, onApply }: PhotoAppraiserProps) {
             style={styles.appraiseButton}
           >
             <Sparkles size={14} />
-            {loading ? "Geminiが相場を調査中..." : "AI で商品識別・価格査定"}
+            {loading ? "AIが候補と相場を検索中..." : "AIで商品候補を検索"}
           </button>
         </>
       )}
@@ -157,47 +161,52 @@ export function PhotoAppraiser({ api, onApply }: PhotoAppraiserProps) {
       )}
 
       {/* 結果表示 */}
-      {result && (
+      {candidates.length > 0 && (
         <div style={styles.resultBox}>
           <div style={styles.resultHeader}>
             <CheckCircle size={16} color="#059669" />
-            <span style={styles.resultTitle}>AI査定完了</span>
+            <span style={styles.resultTitle}>AIが予想した商品候補</span>
           </div>
+          <p style={styles.candidateHint}>近いものを1つ選んでください。選択した候補とこの写真を出品フォームへ反映します。</p>
 
-          <div style={styles.resultGrid}>
-            <ResultRow label="商品名" value={result.title} />
-            {result.brand && <ResultRow label="ブランド" value={result.brand} />}
-            <ResultRow label="カテゴリ" value={result.category} />
-            <ResultRow
-              label="推奨価格"
-              value={`¥${result.price.toLocaleString()} （¥${result.minPrice.toLocaleString()} 〜 ¥${result.maxPrice.toLocaleString()}）`}
-              highlight
-            />
+          <div style={styles.candidateList}>
+            {candidates.slice(0, 3).map((candidate, index) => {
+              const isValidCategory = CATEGORIES.includes(candidate.category);
+              return (
+                <article key={`${candidate.title}-${index}`} style={styles.candidateCard}>
+                  {preview && <img src={preview} alt={`${candidate.title}の入力写真`} style={styles.candidateImage} />}
+                  <div style={styles.candidateContent}>
+                    <span style={styles.candidateRank}>候補 {index + 1}</span>
+                    <strong style={styles.candidateTitle}>{candidate.title}</strong>
+                    {candidate.brand && <span style={styles.candidateMeta}>{candidate.brand}</span>}
+                    <span style={styles.candidateMeta}>{candidate.category}</span>
+                    {candidate.likelihoodReason && <p style={styles.reason}>{candidate.likelihoodReason}</p>}
+                    <ResultRow
+                      label="推奨価格"
+                      value={`¥${candidate.price.toLocaleString()}（¥${candidate.minPrice.toLocaleString()}〜¥${candidate.maxPrice.toLocaleString()}）`}
+                      highlight
+                    />
+                    {candidate.searchSummary && (
+                      <div style={styles.summary}>
+                        <span style={styles.summaryLabel}>相場調査</span>
+                        <p style={styles.summaryText}>{candidate.searchSummary}</p>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => imageFile && onApply(candidate, imageFile)}
+                      style={styles.applyButton}
+                    >
+                      この候補で出品する
+                    </button>
+                    {!isValidCategory && (
+                      <p style={styles.categoryNote}>※カテゴリーは出品フォームで再選択してください</p>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
           </div>
-
-          {result.searchSummary && (
-            <div style={styles.summary}>
-              <span style={styles.summaryLabel}>相場調査</span>
-              <p style={styles.summaryText}>{result.searchSummary}</p>
-            </div>
-          )}
-
-          {result.reason && (
-            <p style={styles.reason}>{result.reason}</p>
-          )}
-
-          <button
-            type="button"
-            onClick={() => onApply(result)}
-            style={styles.applyButton}
-          >
-            この情報を出品フォームに反映する
-          </button>
-          {!isValidCategory && (
-            <p style={styles.categoryNote}>
-              ※カテゴリー「{result.category}」は手動で再選択してください
-            </p>
-          )}
         </div>
       )}
     </div>
@@ -340,6 +349,48 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     fontSize: "13px",
     color: "#4F46E5",
+  },
+  candidateHint: {
+    margin: 0,
+    color: "#64748b",
+    fontSize: "12px",
+  },
+  candidateList: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+    gap: "12px",
+  },
+  candidateCard: {
+    background: "#fff",
+    border: "1px solid #d1fae5",
+    borderRadius: "12px",
+    overflow: "hidden",
+  },
+  candidateImage: {
+    width: "100%",
+    height: "150px",
+    objectFit: "cover",
+    display: "block",
+  },
+  candidateContent: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    padding: "12px",
+  },
+  candidateRank: {
+    color: "#4F46E5",
+    fontSize: "10px",
+    fontWeight: 800,
+  },
+  candidateTitle: {
+    color: "#1A1B2E",
+    fontSize: "14px",
+    lineHeight: 1.4,
+  },
+  candidateMeta: {
+    color: "#64748b",
+    fontSize: "11px",
   },
   resultGrid: {
     display: "flex",

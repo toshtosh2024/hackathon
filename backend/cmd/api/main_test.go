@@ -167,6 +167,25 @@ func TestFormatHistory(t *testing.T) {
 	}
 }
 
+func TestNormalizePhotoCandidatesReturnsThreeUsableChoices(t *testing.T) {
+	got := normalizePhotoCandidates([]photoCandidate{{Title: "iPhone", Category: "家電・スマホ"}})
+	if len(got) != 3 {
+		t.Fatalf("candidate count = %d, want 3", len(got))
+	}
+	for i, candidate := range got {
+		if candidate.Title == "" || candidate.Category == "" || candidate.SearchKeyword == "" {
+			t.Fatalf("candidate %d is incomplete: %+v", i, candidate)
+		}
+	}
+}
+
+func TestNormalizePhotoCandidatesLimitsToThree(t *testing.T) {
+	input := []photoCandidate{{Title: "1"}, {Title: "2"}, {Title: "3"}, {Title: "4"}}
+	if got := normalizePhotoCandidates(input); len(got) != 3 {
+		t.Fatalf("candidate count = %d, want 3", len(got))
+	}
+}
+
 // Benchmark the GCS Reference string parsing algorithm
 func BenchmarkParseGCSRef(b *testing.B) {
 	for i := 0; i < b.N; i++ {

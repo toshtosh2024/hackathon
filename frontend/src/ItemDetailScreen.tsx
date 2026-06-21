@@ -297,7 +297,7 @@ export function ItemDetailScreen({
       setVideoUrl(data.videoUrl);
       setVideoSimulated(data.simulated);
       setIsPlayingVideo(true);
-      onNotice(data.simulated ? "映画風シネマグラフを生成しました！" : "AI動画の生成が完了しました！");
+      onNotice(data.simulated ? "デモ版の動画演出を表示しました" : "生成写真を元にAI商品紹介動画を生成しました！");
       if (onCompleteStep) onCompleteStep(3);
     } catch (err) {
       setVideoError(cleanErrorMessage(err, "AI動画の生成に失敗しました"));
@@ -440,6 +440,14 @@ export function ItemDetailScreen({
             </div>
           </div>
 
+          <section aria-labelledby="item-description-heading">
+            <div className="panel-heading">
+              <Sparkles size={20} />
+              <h3 id="item-description-heading">商品説明</h3>
+            </div>
+            <MarkdownBlock className="item-description" text={currentItem.description} />
+          </section>
+
           <div className="detail-actions">
             <button type="button" className="ghost-button" onClick={like}>❤️ いいねする</button>
             {user?.id !== currentItem.sellerId && currentItem.status === "active" && (
@@ -460,7 +468,7 @@ export function ItemDetailScreen({
               <img className="scene-image" src={getPublicUrl(currentItem.imageUrl) || "/placeholder.svg"} alt="" />
             </section>
             <section className="scene-card">
-              <p className="eyebrow">AI Scene & Video</p>
+              <p className="eyebrow">AI商品紹介動画（デモ版）</p>
               {!scene ? (
                 <div className="scene-placeholder">あなた専用の使用イメージを生成できます</div>
               ) : isPlayingVideo ? (
@@ -481,6 +489,7 @@ export function ItemDetailScreen({
                     <div className="sparkle" style={{ position: "absolute", top: "20%", left: "30%", width: "12px", height: "12px", background: "#fff", borderRadius: "50%", boxShadow: "0 0 10px #fff, 0 0 20px #ffccb8", animation: "sparkleGlow 3s infinite alternate ease-in-out" }}></div>
                     <div className="sparkle" style={{ position: "absolute", top: "60%", left: "70%", width: "8px", height: "8px", background: "#fff", borderRadius: "50%", boxShadow: "0 0 8px #fff, 0 0 16px #b3dcff", animation: "sparkleGlow 2.5s infinite alternate ease-in-out", animationDelay: "0.8s" }}></div>
                     <div className="sparkle" style={{ position: "absolute", top: "40%", left: "80%", width: "10px", height: "10px", background: "#fff", borderRadius: "50%", boxShadow: "0 0 8px #fff, 0 0 16px #ffefe9", animation: "sparkleGlow 3.5s infinite alternate ease-in-out", animationDelay: "1.5s" }}></div>
+                    <span style={{ position: "absolute", top: "10px", right: "10px", padding: "4px 8px", borderRadius: "999px", background: "rgba(26,27,46,.78)", color: "#fff", fontSize: "11px", fontWeight: 700 }}>デモ演出</span>
                   </div>
                 ) : (
                   <video src={videoUrl} autoPlay loop muted playsInline className="scene-image" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} />
@@ -498,10 +507,15 @@ export function ItemDetailScreen({
             {scene && (
               <button type="button" className="ai-button" disabled={!user || videoLoading} onClick={isPlayingVideo ? () => setIsPlayingVideo(false) : () => void generateSceneVideo()} style={{ flex: 1, background: isPlayingVideo ? "#edeef5" : "#4F46E5", color: isPlayingVideo ? "#1A1B2E" : "#ffffff", borderColor: isPlayingVideo ? "#edeef5" : "#4F46E5" }}>
                 <Bot size={18} />
-                {videoLoading ? "動画生成中..." : isPlayingVideo ? "⏹️ 再生停止" : "🎬 AI動画を生成・再生"}
+                {videoLoading ? "AI動画生成APIを実行中..." : isPlayingVideo ? "⏹️ 再生停止" : "🎬 AI商品紹介動画を生成（デモ版）"}
               </button>
             )}
           </div>
+          {scene && (
+            <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: "12px" }}>
+              上の生成写真を入力画像として動画生成APIへ送り、商品の見た目を保った短い紹介動画を作成します。APIを利用できない場合はデモ演出を表示します。
+            </p>
+          )}
           {sceneError && <p className="error">{sceneError}</p>}
           {videoError && <p className="error">{videoError}</p>}
           <div className="panel-heading">

@@ -160,7 +160,6 @@ func (a *app) callOpenAIVision(ctx context.Context, imageBase64, mimeType, promp
 	return res.Choices[0].Message.Content, nil
 }
 
-
 // callGeminiSearch sends a text prompt to Gemini with Google Search grounding enabled.
 // Used for real-time market price research.
 func (a *app) callGeminiSearch(ctx context.Context, prompt string) (string, error) {
@@ -223,8 +222,53 @@ func (a *app) doGeminiRequest(ctx context.Context, apiKey string, reqBody gemini
 	return gemRes.Candidates[0].Content.Parts[0].Text, nil
 }
 
+type photoCandidate struct {
+	Title              string `json:"title"`
+	Brand              string `json:"brand"`
+	Category           string `json:"category"`
+	EstimatedCondition string `json:"estimatedCondition,omitempty"`
+	SearchKeyword      string `json:"searchKeyword,omitempty"`
+	LikelihoodReason   string `json:"likelihoodReason,omitempty"`
+	Price              int    `json:"price"`
+	MinPrice           int    `json:"minPrice"`
+	MaxPrice           int    `json:"maxPrice"`
+	Reason             string `json:"reason"`
+	SearchSummary      string `json:"searchSummary"`
+}
+
+func normalizePhotoCandidates(candidates []photoCandidate) []photoCandidate {
+	if len(candidates) == 0 {
+		candidates = []photoCandidate{
+			{Title: "商品候補 1", Category: "その他", SearchKeyword: "フリマ 商品"},
+			{Title: "商品候補 2", Category: "その他", SearchKeyword: "フリマ 商品"},
+			{Title: "商品候補 3", Category: "その他", SearchKeyword: "フリマ 商品"},
+		}
+	}
+	if len(candidates) > 3 {
+		candidates = candidates[:3]
+	}
+	for len(candidates) < 3 {
+		base := candidates[0]
+		base.Title = fmt.Sprintf("%s（候補%d）", base.Title, len(candidates)+1)
+		candidates = append(candidates, base)
+	}
+	for i := range candidates {
+		candidate := &candidates[i]
+		if strings.TrimSpace(candidate.Title) == "" {
+			candidate.Title = fmt.Sprintf("商品候補 %d", i+1)
+		}
+		if strings.TrimSpace(candidate.Category) == "" {
+			candidate.Category = "その他"
+		}
+		if strings.TrimSpace(candidate.SearchKeyword) == "" {
+			candidate.SearchKeyword = candidate.Title
+		}
+	}
+	return candidates
+}
+
 // photoAppraise は写真からGemini Vision + Google Search grounding を用いて
-// 商品を識別し、ウェブ上の相場を調査して価格を提案するエンドポイントです。
+// 商品候補を3件識別し、候補ごとの相場価格を提案するエンドポイントです。
 func (a *app) photoAppraise(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ImageBase64 string `json:"imageBase64"`
@@ -246,17 +290,24 @@ func (a *app) photoAppraise(w http.ResponseWriter, r *http.Request) {
 		req.Condition = "良い"
 	}
 
-	// Step 1: Gemini Vision で商品を識別する（検索なし・JSON出力）
+	// Step 1: Gemini Vision で可能性の高い商品を3候補に絞る（検索なし・JSON出力）
 	visionPrompt := fmt.Sprintf(`この商品画像を詳細に分析してください。
 
 以下のJSONフォーマット"のみ"で出力してください（マークダウンや説明文は不要）：
 {
-  "title": "商品名（ブランド・型番を含む具体的な名称）",
-  "brand": "ブランド名（不明な場合は空文字）",
-  "category": "以下のいずれか1つ: 家電・スマホ / 衣服・ファッション / 本・ゲーム・エンタメ / おもちゃ・ホビー / スポーツ・レジャー / ハンドメイド / その他",
-  "estimatedCondition": "画像から見た状態の説明",
-  "searchKeyword": "フリマサイト相場調査に使う最適な日本語検索キーワード"
+  "candidates": [
+    {
+      "title": "商品名（ブランド・型番を含む具体的な名称）",
+      "brand": "ブランド名（不明な場合は空文字）",
+      "category": "以下のいずれか1つ: 家電・スマホ / 衣服・ファッション / 本・ゲーム・エンタメ / おもちゃ・ホビー / スポーツ・レジャー / ハンドメイド / その他",
+      "estimatedCondition": "画像から見た状態の説明",
+      "searchKeyword": "フリマサイト相場調査に使う最適な日本語検索キーワード",
+      "likelihoodReason": "この候補と判断した画像上の根拠（40文字以内）"
+    }
+  ]
 }
+
+可能性が高い順に、異なる商品名・型番の候補を必ず3件返してください。
 
 商品の状態（ユーザー申告）: %s`, req.Condition)
 
@@ -304,46 +355,36 @@ func (a *app) photoAppraise(w http.ResponseWriter, r *http.Request) {
 
 	// Step 1 のJSON をパース
 	var visionResult struct {
-		Title              string `json:"title"`
-		Brand              string `json:"brand"`
-		Category           string `json:"category"`
-		EstimatedCondition string `json:"estimatedCondition"`
-		SearchKeyword      string `json:"searchKeyword"`
+		Candidates []photoCandidate `json:"candidates"`
 	}
 	cleanedJSON := extractJSON(visionJSON)
 	if err := json.Unmarshal([]byte(cleanedJSON), &visionResult); err != nil {
-		// パース失敗時はフォールバック
-		visionResult.Title = "商品（詳細不明）"
-		visionResult.Category = "その他"
-		visionResult.SearchKeyword = "フリマ 商品"
+		visionResult.Candidates = nil
 	}
-	if strings.TrimSpace(visionResult.SearchKeyword) == "" {
-		visionResult.SearchKeyword = visionResult.Title
-	}
+	visionResult.Candidates = normalizePhotoCandidates(visionResult.Candidates)
 
-	// Step 2: Google Search grounding で日本のフリマ相場を調査
-	searchPrompt := fmt.Sprintf(`日本のフリマアプリ（メルカリ、ヤフオク、ラクマ、PayPayフリマ等）で「%s」の現在の取引相場をGoogle検索で調べてください。
+	// Step 2: Google Search grounding で3候補の日本のフリマ相場をまとめて調査
+	candidateJSON, _ := json.Marshal(visionResult.Candidates)
+	searchPrompt := fmt.Sprintf(`次の3つの商品候補について、日本のフリマアプリ（メルカリ、ヤフオク、ラクマ、PayPayフリマ等）の現在の取引相場をGoogle検索で調べてください。
 
-商品状態: %s（%s）
+商品候補: %s
 
-以下の情報を簡潔に日本語でまとめてください：
-1. 相場価格帯（最安値〜最高値）
-2. 平均的な取引価格
-3. 状態による価格差
-4. 推奨出品価格と最低許容価格
+商品状態（ユーザー申告）: %s
 
-最後に以下のJSONブロックを出力してください：
+候補の順序を変えず、最後に以下のJSONブロックを出力してください：
 <json>
 {
-  "price": 推奨出品価格（数値・円）,
-  "minPrice": 最低許容価格（数値・円）,
-  "maxPrice": 市場最高価格の目安（数値・円）,
-  "reason": "価格提案の根拠（市場調査結果を含む50文字以内）",
-  "searchSummary": "相場調査サマリー（100文字以内）"
+  "candidates": [
+    {
+      "price": 推奨出品価格（数値・円）,
+      "minPrice": 最低許容価格（数値・円）,
+      "maxPrice": 市場最高価格の目安（数値・円）,
+      "reason": "価格提案の根拠（市場調査結果を含む50文字以内）",
+      "searchSummary": "相場調査サマリー（100文字以内）"
+    }
+  ]
 }
-</json>`,
-		visionResult.SearchKeyword, req.Condition, visionResult.EstimatedCondition,
-	)
+</json>`, string(candidateJSON), req.Condition)
 
 	var searchText string
 	var err error
@@ -372,33 +413,36 @@ func (a *app) photoAppraise(w http.ResponseWriter, r *http.Request) {
 
 	// Step 2 の結果から JSON ブロックを抽出してパース
 	var priceResult struct {
-		Price         int    `json:"price"`
-		MinPrice      int    `json:"minPrice"`
-		MaxPrice      int    `json:"maxPrice"`
-		Reason        string `json:"reason"`
-		SearchSummary string `json:"searchSummary"`
+		Candidates []photoCandidate `json:"candidates"`
 	}
 
 	priceJSON := extractTaggedJSON(searchText)
-	if priceJSON == "" || json.Unmarshal([]byte(priceJSON), &priceResult) != nil {
-		// フォールバック: カテゴリーに基づくデフォルト価格
-		priceResult.Price = defaultPrice(visionResult.Category, req.Condition)
-		priceResult.MinPrice = int(float64(priceResult.Price) * 0.7)
-		priceResult.MaxPrice = int(float64(priceResult.Price) * 1.5)
-		priceResult.Reason = "商品識別完了。相場データを取得できなかったため概算価格を設定しました。"
-		priceResult.SearchSummary = searchText
+	if priceJSON != "" {
+		_ = json.Unmarshal([]byte(priceJSON), &priceResult)
+	}
+
+	for i := range visionResult.Candidates {
+		candidate := &visionResult.Candidates[i]
+		if i < len(priceResult.Candidates) {
+			price := priceResult.Candidates[i]
+			candidate.Price = price.Price
+			candidate.MinPrice = price.MinPrice
+			candidate.MaxPrice = price.MaxPrice
+			candidate.Reason = price.Reason
+			candidate.SearchSummary = price.SearchSummary
+		}
+		if candidate.Price <= 0 {
+			candidate.Price = defaultPrice(candidate.Category, req.Condition)
+			candidate.MinPrice = int(float64(candidate.Price) * 0.7)
+			candidate.MaxPrice = int(float64(candidate.Price) * 1.5)
+			candidate.Reason = "商品識別結果から概算価格を設定しました。"
+			candidate.SearchSummary = searchText
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"title":         visionResult.Title,
-		"brand":         visionResult.Brand,
-		"category":      visionResult.Category,
-		"condition":     req.Condition,
-		"price":         priceResult.Price,
-		"minPrice":      priceResult.MinPrice,
-		"maxPrice":      priceResult.MaxPrice,
-		"reason":        priceResult.Reason,
-		"searchSummary": priceResult.SearchSummary,
+		"condition":  req.Condition,
+		"candidates": visionResult.Candidates,
 	})
 }
 
@@ -611,6 +655,14 @@ func (a *app) callGeminiVideoGenerate(ctx context.Context, prompt string, base64
 		var opStatus struct {
 			Done     bool `json:"done"`
 			Response *struct {
+				GenerateVideoResponse struct {
+					GeneratedSamples []struct {
+						Video struct {
+							Uri                string `json:"uri"`
+							BytesBase64Encoded string `json:"bytesBase64Encoded"`
+						} `json:"video"`
+					} `json:"generatedSamples"`
+				} `json:"generateVideoResponse"`
 				GeneratedVideos []struct {
 					Video struct {
 						Uri                string `json:"uri"`
@@ -633,6 +685,17 @@ func (a *app) callGeminiVideoGenerate(ctx context.Context, prompt string, base64
 				return nil, fmt.Errorf("Veo 3.1 completed but returned no response payload")
 			}
 
+			// Gemini REST API の現在のレスポンス形式。
+			if len(opStatus.Response.GenerateVideoResponse.GeneratedSamples) > 0 {
+				video := opStatus.Response.GenerateVideoResponse.GeneratedSamples[0].Video
+				if video.BytesBase64Encoded != "" {
+					return base64.StdEncoding.DecodeString(video.BytesBase64Encoded)
+				}
+				if video.Uri != "" {
+					return a.downloadGeminiVideo(ctx, client, video.Uri, apiKey)
+				}
+			}
+
 			// bytesBase64Encoded が直接 predictions に含まれている場合
 			if len(opStatus.Response.Predictions) > 0 && opStatus.Response.Predictions[0].BytesBase64Encoded != "" {
 				return base64.StdEncoding.DecodeString(opStatus.Response.Predictions[0].BytesBase64Encoded)
@@ -645,27 +708,7 @@ func (a *app) callGeminiVideoGenerate(ctx context.Context, prompt string, base64
 					return base64.StdEncoding.DecodeString(video.BytesBase64Encoded)
 				}
 				if video.Uri != "" {
-					downloadURL := video.Uri
-					if !strings.Contains(downloadURL, "?") {
-						downloadURL = fmt.Sprintf("%s?key=%s", downloadURL, apiKey)
-					} else {
-						downloadURL = fmt.Sprintf("%s&key=%s", downloadURL, apiKey)
-					}
-					dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-					if err != nil {
-						return nil, err
-					}
-					dlResp, err := client.Do(dlReq)
-					if err != nil {
-						return nil, err
-					}
-					defer dlResp.Body.Close()
-
-					if dlResp.StatusCode >= 300 {
-						dlBody, _ := io.ReadAll(dlResp.Body)
-						return nil, fmt.Errorf("failed to download video from URI %d: %s", dlResp.StatusCode, string(dlBody))
-					}
-					return io.ReadAll(dlResp.Body)
+					return a.downloadGeminiVideo(ctx, client, video.Uri, apiKey)
 				}
 			}
 
@@ -674,6 +717,31 @@ func (a *app) callGeminiVideoGenerate(ctx context.Context, prompt string, base64
 	}
 
 	return nil, fmt.Errorf("Veo 3.1 video generation timed out (40s limit)")
+}
+
+func (a *app) downloadGeminiVideo(ctx context.Context, client *http.Client, uri, apiKey string) ([]byte, error) {
+	downloadURL := uri
+	if !strings.Contains(downloadURL, "?") {
+		downloadURL = fmt.Sprintf("%s?key=%s", downloadURL, apiKey)
+	} else {
+		downloadURL = fmt.Sprintf("%s&key=%s", downloadURL, apiKey)
+	}
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	dlReq.Header.Set("x-goog-api-key", apiKey)
+	dlResp, err := client.Do(dlReq)
+	if err != nil {
+		return nil, err
+	}
+	defer dlResp.Body.Close()
+
+	if dlResp.StatusCode >= 300 {
+		dlBody, _ := io.ReadAll(dlResp.Body)
+		return nil, fmt.Errorf("failed to download video from URI %d: %s", dlResp.StatusCode, string(dlBody))
+	}
+	return io.ReadAll(dlResp.Body)
 }
 
 // defaultPrice はカテゴリーと状態に基づくフォールバック価格を返します。
@@ -685,7 +753,7 @@ func defaultPrice(category, condition string) int {
 		"おもちゃ・ホビー":   2000,
 		"スポーツ・レジャー":  4000,
 		"ハンドメイド":     2500,
-		"その他":         2000,
+		"その他":        2000,
 	}
 	price, ok := base[category]
 	if !ok {
