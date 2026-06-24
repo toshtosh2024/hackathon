@@ -102,7 +102,11 @@ func (a *app) firebaseLogin(w http.ResponseWriter, r *http.Request) {
 	_, err = db.ExecContext(r.Context(), `INSERT INTO users (name, email, password_hash, role, avatar_url)
 		VALUES (?, ?, ?, 'user', ?)
 		ON DUPLICATE KEY UPDATE name = VALUES(name),
-		avatar_url = CASE WHEN VALUES(avatar_url) = '' THEN avatar_url ELSE VALUES(avatar_url) END`,
+		avatar_url = CASE
+			WHEN avatar_url LIKE '/uploads/avatar-%' OR avatar_url LIKE 'gcs://%' THEN avatar_url
+			WHEN VALUES(avatar_url) = '' THEN avatar_url
+			ELSE VALUES(avatar_url)
+		END`,
 		name, strings.ToLower(email), a.hashPassword("firebase:"+token.UID), avatarURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to synchronize Firebase user")
