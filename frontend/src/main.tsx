@@ -296,6 +296,22 @@ function App() {
             {!isMobile && (
               <IconLabel icon={UserCircle2} label={user?.name ?? "User"} value={user?.email?.split("@")[0] ?? ""} className="session-badge" />
             )}
+            <button
+              type="button"
+              onClick={() => navigate({ page: "mypage" })}
+              aria-label="マイページ"
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+            >
+              {user.avatarUrl ? (
+                <img
+                  src={getPublicUrl(user.avatarUrl) ?? ""}
+                  alt={user.name}
+                  style={{ width: "34px", height: "34px", borderRadius: "50%", objectFit: "cover", border: "2px solid var(--primary)" }}
+                />
+              ) : (
+                <UserCircle2 size={34} style={{ color: "var(--primary)" }} />
+              )}
+            </button>
             <button type="button" className="ghost-button" onClick={logout} style={{ minHeight: "36px", padding: "0 12px" }}>
               <LogOut size={16} />
               {!isMobile && <span>終了</span>}
