@@ -3,10 +3,10 @@
  * @description Next Market - 認証画面（ログイン ＆ 会員登録 ＆ 開発者デモパスワードリライター）
  */
 
-import React, { useState, FormEvent } from "react";
+import React, { useState, useEffect, FormEvent } from "react";
 import { LogIn, Store, PackagePlus, MessageCircle } from "lucide-react";
 import { User } from "./types";
-import { signInWithPopup } from "firebase/auth";
+import { getRedirectResult, signInWithPopup, signInWithRedirect } from "firebase/auth";
 import { firebaseAuth, firebaseConfigured, googleProvider } from "./firebase";
 import { API_BASE } from "./config";
 
@@ -46,6 +46,39 @@ export function AuthScreen({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  async function completeFirebaseLogin(idToken: string) {
+    const response = await fetch(`${API_BASE}/auth/firebase`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? "Google ログインに失敗しました");
+    onSessionUpdated(data.token, data.user);
+  }
+
+  useEffect(() => {
+    if (!firebaseConfigured) return;
+    let active = true;
+    getRedirectResult(firebaseAuth)
+      .then(async (credential) => {
+        if (!active || !credential) return;
+        setLoading(true);
+        setError("");
+        await completeFirebaseLogin(await credential.user.getIdToken());
+      })
+      .catch((err) => {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : "Google ログインに失敗しました");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setLoading(true);
@@ -82,17 +115,14 @@ export function AuthScreen({
     try {
       if (!firebaseConfigured) throw new Error("Firebase の環境変数が未設定です。frontend/.env.example を参照してください。");
       const credential = await signInWithPopup(firebaseAuth, googleProvider);
-      const response = await fetch(`${API_BASE}/auth/firebase`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken: await credential.user.getIdToken() })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Google ログインに失敗しました");
-      onSessionUpdated(data.token, data.user);
+      await completeFirebaseLogin(await credential.user.getIdToken());
     } catch (err) {
       const code = typeof err === "object" && err && "code" in err ? String(err.code) : "";
-      if (code !== "auth/popup-closed-by-user") setError(err instanceof Error ? err.message : "Google ログインに失敗しました");
+      if (code === "auth/popup-blocked" || code === "auth/popup-closed-by-user") {
+        await signInWithRedirect(firebaseAuth, googleProvider);
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Google ログインに失敗しました");
     } finally {
       setLoading(false);
     }
