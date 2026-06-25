@@ -29,8 +29,7 @@ import { MessagesScreen } from "./MessagesScreen";
 import { MyPageScreen } from "./MyPageScreen";
 import { AdminDashboardScreen } from "./AdminDashboardScreen";
 import { HelpScreen } from "./HelpScreen";
-
-const API_BASE = "/api";
+import { API_BASE } from "./config";
 
 function IconLabel({
   icon: Icon,

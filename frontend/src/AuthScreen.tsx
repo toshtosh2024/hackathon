@@ -8,8 +8,7 @@ import { LogIn, Store, PackagePlus, MessageCircle } from "lucide-react";
 import { User } from "./types";
 import { signInWithPopup } from "firebase/auth";
 import { firebaseAuth, firebaseConfigured, googleProvider } from "./firebase";
-
-const API_BASE = "/api";
+import { API_BASE } from "./config";
 
 function IconLabel({
   icon: Icon,
