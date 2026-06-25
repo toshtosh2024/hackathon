@@ -772,6 +772,24 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := migrations.RunMigrations(db); err != nil {
 		return err
 	}
+	if err := ensureColumn(ctx, db, "users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url TEXT NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "items", "min_price", "ALTER TABLE items ADD COLUMN min_price INT NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "items", "ai_personality", "ALTER TABLE items ADD COLUMN ai_personality VARCHAR(50) NOT NULL DEFAULT 'standard'"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "items", "barter_enabled", "ALTER TABLE items ADD COLUMN barter_enabled TINYINT(1) NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "items", "want_category", "ALTER TABLE items ADD COLUMN want_category VARCHAR(100) NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "item_scene_generations", "video_path", "ALTER TABLE item_scene_generations ADD COLUMN video_path TEXT NULL"); err != nil {
+		return err
+	}
 
 	// Dynamically and idempotently apply composite performance indexes to prevent MySQL duplicate key errors (Error 1061)
 	if err := ensureIndex(ctx, db, "purchases", "idx_purchases_seller_created_at_price",
@@ -795,6 +813,25 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 
+	return nil
+}
+
+func ensureColumn(ctx context.Context, db *sql.DB, tableName, columnName, alterSQL string) error {
+	var count int
+	err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`, tableName, columnName,
+	).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		log.Printf("Dynamically applying missing schema column: %s.%s...", tableName, columnName)
+		if _, err := db.ExecContext(ctx, alterSQL); err != nil {
+			return fmt.Errorf("failed to add column %s.%s: %v", tableName, columnName, err)
+		}
+	}
 	return nil
 }
 
