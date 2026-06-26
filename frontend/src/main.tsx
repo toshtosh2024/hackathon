@@ -16,6 +16,7 @@ import {
   PackagePlus,
   UserCircle2
 } from "lucide-react";
+import { signOut } from "firebase/auth";
 
 // 共有定義・モデル
 import { User, Item, Conversation, Message, Route, NavPage, NavItem, PersonalStats, getPublicUrl } from "./types";
@@ -30,6 +31,7 @@ import { MyPageScreen } from "./MyPageScreen";
 import { AdminDashboardScreen } from "./AdminDashboardScreen";
 import { HelpScreen } from "./HelpScreen";
 import { API_BASE } from "./config";
+import { firebaseAuth, firebaseConfigured } from "./firebase";
 
 function IconLabel({
   icon: Icon,
@@ -148,7 +150,7 @@ function App() {
     
     // Auto-logout on 401 Unauthorized (expired or invalid token)
     if (response.status === 401 && path !== "/auth/login" && path !== "/auth/register") {
-      logout();
+      void logout();
       throw new Error("セッションの有効期限が切れました。もう一度ログインしてください。");
     }
     
@@ -258,10 +260,18 @@ function App() {
     setRoute({ page: "home" });
   };
 
-  const logout = () => {
+  const logout = async () => {
+    if (firebaseConfigured && firebaseAuth.currentUser) {
+      try {
+        await signOut(firebaseAuth);
+      } catch (err) {
+        console.warn("Firebase sign out failed", err);
+      }
+    }
     setToken("");
     setUser(null);
     clearStoredSession();
+    window.history.replaceState(null, "", "#auth");
     setRoute({ page: "auth" });
   };
 
