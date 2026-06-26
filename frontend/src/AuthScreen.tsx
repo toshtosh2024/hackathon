@@ -6,7 +6,7 @@
 import React, { useState, useEffect, FormEvent } from "react";
 import { LogIn, Store, PackagePlus, MessageCircle } from "lucide-react";
 import { User } from "./types";
-import { getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, User as FirebaseUser } from "firebase/auth";
+import { onAuthStateChanged, signInWithPopup, User as FirebaseUser } from "firebase/auth";
 import { firebaseAuth, firebaseConfigured, googleProvider } from "./firebase";
 import { API_BASE } from "./config";
 
@@ -73,8 +73,11 @@ export function AuthScreen({
     if (code === "auth/operation-not-allowed" || message.includes("auth/operation-not-allowed")) {
       return "Firebase Console の Authentication > Sign-in method で Google ログインを有効化してください。";
     }
-    if (code === "auth/popup-closed-by-user") {
+    if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
       return "Google ログインのポップアップが閉じられました。もう一度お試しください。";
+    }
+    if (code === "auth/popup-blocked") {
+      return "Google ログインのポップアップがブロックされました。ブラウザのポップアップ許可設定を確認して、もう一度お試しください。";
     }
     return message || "Google ログインに失敗しました";
   }
@@ -104,19 +107,7 @@ export function AuthScreen({
     const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
       if (user) void syncFirebaseUser(user);
     });
-
-    getRedirectResult(firebaseAuth)
-      .then((credential) => {
-        if (!active || !credential) return;
-        void syncFirebaseUser(credential.user);
-      })
-      .catch((err) => {
-        if (!active) return;
-        setError(googleAuthErrorMessage(err));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    setLoading(false);
     return () => {
       active = false;
       unsubscribe();
@@ -161,15 +152,6 @@ export function AuthScreen({
       const credential = await signInWithPopup(firebaseAuth, googleProvider);
       await completeFirebaseLogin(await credential.user.getIdToken());
     } catch (err) {
-      const code = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code) : "";
-      if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
-        try {
-          await signInWithRedirect(firebaseAuth, googleProvider);
-        } catch (redirectErr) {
-          setError(googleAuthErrorMessage(redirectErr));
-        }
-        return;
-      }
       setError(googleAuthErrorMessage(err));
     } finally {
       setLoading(false);
