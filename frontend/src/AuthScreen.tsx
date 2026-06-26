@@ -6,7 +6,7 @@
 import React, { useState, useEffect, FormEvent } from "react";
 import { LogIn, Store, PackagePlus, MessageCircle } from "lucide-react";
 import { User } from "./types";
-import { getRedirectResult, onAuthStateChanged, signInWithRedirect, User as FirebaseUser } from "firebase/auth";
+import { getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, User as FirebaseUser } from "firebase/auth";
 import { firebaseAuth, firebaseConfigured, googleProvider } from "./firebase";
 import { API_BASE } from "./config";
 
@@ -52,9 +52,31 @@ export function AuthScreen({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ idToken })
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error ?? "Google ログインに失敗しました");
+    const contentType = response.headers.get("content-type") ?? "";
+    const data = contentType.includes("application/json") ? await response.json() : null;
+    if (!response.ok) {
+      throw new Error(data?.error ?? `Google ログイン後のAPI認証に失敗しました (${response.status})`);
+    }
+    if (!data?.token || !data?.user) {
+      throw new Error("Google ログイン後のAPI応答が不正です。VITE_API_BASE_URL が Cloud Run API を指しているか確認してください。");
+    }
     onSessionUpdated(data.token, data.user);
+  }
+
+  function googleAuthErrorMessage(err: unknown) {
+    const code = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code) : "";
+    const message = err instanceof Error ? err.message : "";
+    const currentHost = window.location.hostname;
+    if (code === "auth/unauthorized-domain" || message.includes("auth/unauthorized-domain")) {
+      return `このドメイン (${currentHost}) が Firebase Authentication の承認済みドメインにありません。Firebase Console > Authentication > Settings > Authorized domains に ${currentHost} を追加してください。`;
+    }
+    if (code === "auth/operation-not-allowed" || message.includes("auth/operation-not-allowed")) {
+      return "Firebase Console の Authentication > Sign-in method で Google ログインを有効化してください。";
+    }
+    if (code === "auth/popup-closed-by-user") {
+      return "Google ログインのポップアップが閉じられました。もう一度お試しください。";
+    }
+    return message || "Google ログインに失敗しました";
   }
 
   useEffect(() => {
@@ -71,7 +93,7 @@ export function AuthScreen({
         await completeFirebaseLogin(await user.getIdToken());
       } catch (err) {
         if (active) {
-          setError(err instanceof Error ? err.message : "Google ログインに失敗しました");
+          setError(googleAuthErrorMessage(err));
         }
       } finally {
         syncing = false;
@@ -90,7 +112,7 @@ export function AuthScreen({
       })
       .catch((err) => {
         if (!active) return;
-        setError(err instanceof Error ? err.message : "Google ログインに失敗しました");
+        setError(googleAuthErrorMessage(err));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -136,9 +158,19 @@ export function AuthScreen({
     setError("");
     try {
       if (!firebaseConfigured) throw new Error("Firebase の環境変数が未設定です。frontend/.env.example を参照してください。");
-      await signInWithRedirect(firebaseAuth, googleProvider);
+      const credential = await signInWithPopup(firebaseAuth, googleProvider);
+      await completeFirebaseLogin(await credential.user.getIdToken());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Google ログインに失敗しました");
+      const code = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code) : "";
+      if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
+        try {
+          await signInWithRedirect(firebaseAuth, googleProvider);
+        } catch (redirectErr) {
+          setError(googleAuthErrorMessage(redirectErr));
+        }
+        return;
+      }
+      setError(googleAuthErrorMessage(err));
     } finally {
       setLoading(false);
     }
