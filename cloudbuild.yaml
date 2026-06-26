@@ -36,9 +36,12 @@ steps:
       - --service-account
       - ${_RUNTIME_SERVICE_ACCOUNT}
       - --update-env-vars
-      - GCS_BUCKET=${_UPLOADS_BUCKET},FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID}
+      - DB_USER=${_DB_USER},DB_NAME=${_DB_NAME},INSTANCE_UNIX_SOCKET=/cloudsql/${_CLOUD_SQL_CONNECTION},GCS_BUCKET=${_UPLOADS_BUCKET},FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID},OPENAI_MODEL=${_OPENAI_MODEL},ALLOWED_ORIGIN=${_ALLOWED_ORIGIN}
+      - --update-secrets
+      - DB_PASS=${_DB_PASS_SECRET}:latest,JWT_SECRET=${_JWT_SECRET}:latest,OPENAI_API_KEY=${_OPENAI_API_KEY_SECRET}:latest
       - --add-cloudsql-instances
       - ${_CLOUD_SQL_CONNECTION}
+      - --allow-unauthenticated
       - --quiet
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE}:${_TAG}
@@ -51,6 +54,13 @@ substitutions:
   _IMAGE: next-market
   _SERVICE: next-market
   _TAG: latest
+  _DB_USER: nextmarket
+  _DB_NAME: nextmarket
+  _DB_PASS_SECRET: next-market-db-password
+  _JWT_SECRET: next-market-jwt-secret
+  _OPENAI_API_KEY_SECRET: next-market-openai-api-key
+  _OPENAI_MODEL: gpt-4o-mini
+  _ALLOWED_ORIGIN: https://hackathon-brown-gamma.vercel.app
   _RUNTIME_SERVICE_ACCOUNT: next-market-run@${PROJECT_ID}.iam.gserviceaccount.com
   _UPLOADS_BUCKET: ${PROJECT_ID}-next-market-uploads
   _CLOUD_SQL_CONNECTION: ${PROJECT_ID}:asia-northeast1:next-market-mysql
