@@ -59,7 +59,7 @@ func (s *gcsImageStore) Save(ctx context.Context, purpose, contentType string, d
 	}
 	objectPath := fmt.Sprintf("gcs://%s/%s", s.bucket, objectName)
 	return uploadResult{
-		PublicURL: gcsPathToPublicURL(objectPath), ObjectPath: objectPath, ContentType: contentType,
+		PublicURL: "/uploads/" + objectName, ObjectPath: objectPath, ContentType: contentType,
 	}, nil
 }
 
@@ -118,6 +118,49 @@ func (a *app) uploadImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, result)
+}
+
+func (a *app) serveUploadedImage(w http.ResponseWriter, r *http.Request) {
+	objectName := strings.TrimPrefix(r.URL.Path, "/uploads/")
+	objectName = strings.TrimPrefix(filepath.Clean("/"+objectName), "/")
+	if objectName == "." || objectName == "" || strings.HasPrefix(objectName, "../") {
+		http.NotFound(w, r)
+		return
+	}
+
+	if bucket := strings.TrimSpace(os.Getenv("GCS_BUCKET")); bucket != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer cancel()
+
+		client, err := storage.NewClient(ctx)
+		if err != nil {
+			log.Printf("failed to initialize GCS reader: %v", err)
+			http.Error(w, "画像を読み込めませんでした", http.StatusBadGateway)
+			return
+		}
+		defer client.Close()
+
+		obj := client.Bucket(bucket).Object(objectName)
+		attrs, _ := obj.Attrs(ctx)
+		reader, err := obj.NewReader(ctx)
+		if err != nil {
+			log.Printf("failed to read GCS object %s/%s: %v", bucket, objectName, err)
+			http.NotFound(w, r)
+			return
+		}
+		defer reader.Close()
+
+		if attrs != nil && attrs.ContentType != "" {
+			w.Header().Set("Content-Type", attrs.ContentType)
+		}
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		if _, err := io.Copy(w, reader); err != nil {
+			log.Printf("failed to stream uploaded image %s: %v", objectName, err)
+		}
+		return
+	}
+
+	http.StripPrefix("/uploads/", http.FileServer(http.Dir(env("UPLOAD_DIR", "uploads")))).ServeHTTP(w, r)
 }
 
 func allowedImageType(contentType string) bool {

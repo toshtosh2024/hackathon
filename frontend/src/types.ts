@@ -7,6 +7,8 @@
 /**
  * システム内ユーザーのアカウント情報
  */
+import { API_BASE } from "./config";
+
 export interface User {
   /** ユーザー固有識別ID */
   id: number;
@@ -210,9 +212,23 @@ export interface PersonalStats {
  */
 export function getPublicUrl(url: string | null | undefined): string {
   if (!url) return "";
+  const apiAssetBase = API_BASE.replace(/\/api$/, "");
+  if (url.startsWith("/uploads/")) {
+    return `${apiAssetBase}${url}`;
+  }
   if (url.startsWith("gcs://")) {
     const cleanPath = url.replace("gcs://", "");
-    return `https://storage.googleapis.com/${cleanPath}`;
+    const [, objectName] = cleanPath.split(/\/(.+)/);
+    return objectName ? `${apiAssetBase}/uploads/${objectName}` : "";
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === "storage.googleapis.com") {
+      const [, , objectName] = parsed.pathname.split(/\/([^/]+)\//);
+      return objectName ? `${apiAssetBase}/uploads/${objectName}` : url;
+    }
+  } catch {
+    // Keep non-URL values unchanged.
   }
   return url;
 }

@@ -218,7 +218,7 @@ func main() {
 	mux.HandleFunc("POST /api/items/{id}/ai-video", a.requireAuth(a.generateSceneVideo))
 	mux.HandleFunc("POST /api/items/{id}/cancel", a.requireAuth(a.cancelItem))
 	mux.HandleFunc("POST /api/uploads", a.requireAuth(a.uploadImage))
-	mux.Handle("GET /uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(env("UPLOAD_DIR", "uploads")))))
+	mux.HandleFunc("GET /uploads/", a.serveUploadedImage)
 	mux.HandleFunc("POST /api/profile", a.requireAuth(a.updateProfile))
 	mux.HandleFunc("POST /api/profile/password", a.requireAuth(a.changePassword))
 	mux.HandleFunc("POST /api/demo/seed", a.seedDemo)
