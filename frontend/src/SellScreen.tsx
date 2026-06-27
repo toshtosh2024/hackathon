@@ -90,7 +90,7 @@ export function SellScreen({
       const urls: string[] = [];
       for (const file of imageFiles) {
         const uploaded = await uploadImage(api, file, "item");
-        urls.push(uploaded.publicUrl);
+        urls.push(uploaded.objectPath || uploaded.publicUrl);
       }
 
       const item = await api<{ item: Item }>("/items", {

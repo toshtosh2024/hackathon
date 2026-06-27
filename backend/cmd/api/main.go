@@ -24,6 +24,7 @@ import (
 
 	"next-market/backend/migrations"
 
+	"cloud.google.com/go/storage"
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
 	_ "github.com/go-sql-driver/mysql"
@@ -397,6 +398,14 @@ func gcsPathToPublicURL(path string) string {
 
 func (a *app) downloadImageAsset(ctx context.Context, path string) ([]byte, string, error) {
 	if strings.HasPrefix(path, "/uploads/") {
+		if bucket := strings.TrimSpace(os.Getenv("GCS_BUCKET")); bucket != "" {
+			objectName := strings.TrimPrefix(path, "/uploads/")
+			data, contentType, err := downloadGCSObject(ctx, bucket, objectName)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to read GCS upload %s: %w", path, err)
+			}
+			return data, contentType, nil
+		}
 		uploadDir := env("UPLOAD_DIR", "uploads")
 		filename := strings.TrimPrefix(path, "/uploads/")
 		data, err := os.ReadFile(filepath.Join(uploadDir, filename))
@@ -431,30 +440,65 @@ func (a *app) downloadImageAsset(ctx context.Context, path string) ([]byte, stri
 		if err != nil {
 			return nil, "", err
 		}
-		readURL, err := signedGCSURL(bucket, objectName, http.MethodGet, "", 15*time.Minute)
-		if err != nil {
-			return nil, "", err
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, readURL, nil)
-		if err != nil {
-			return nil, "", err
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return nil, "", err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 300 {
-			return nil, "", fmt.Errorf("failed to fetch GCS ref %s: status %d", path, resp.StatusCode)
-		}
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, "", err
-		}
-		return data, resp.Header.Get("Content-Type"), nil
+		return downloadGCSObject(ctx, bucket, objectName)
 	}
 
 	return nil, "", errors.New("unsupported asset path format")
+}
+
+func downloadGCSObject(ctx context.Context, bucket, objectName string) ([]byte, string, error) {
+	if bucket == "" || objectName == "" {
+		return nil, "", errors.New("missing GCS bucket or object name")
+	}
+	client, err := storage.NewClient(ctx)
+	if err == nil {
+		defer client.Close()
+		obj := client.Bucket(bucket).Object(objectName)
+		attrs, _ := obj.Attrs(ctx)
+		reader, err := obj.NewReader(ctx)
+		if err != nil {
+			return nil, "", err
+		}
+		defer reader.Close()
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			return nil, "", err
+		}
+		contentType := ""
+		if attrs != nil {
+			contentType = attrs.ContentType
+		}
+		if contentType == "" {
+			contentType = http.DetectContentType(data)
+		}
+		return data, contentType, nil
+	}
+
+	readURL, err := signedGCSURL(bucket, objectName, http.MethodGet, "", 15*time.Minute)
+	if err != nil {
+		return nil, "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, readURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("failed to fetch GCS object gs://%s/%s: status %d", bucket, objectName, resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+	return data, contentType, nil
 }
 
 func parseGCSRef(ref string) (string, string, error) {
